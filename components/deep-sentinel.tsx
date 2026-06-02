@@ -12,7 +12,7 @@ const PROCESSING_STEPS = [
   "Running Wav2Vec 2.0 + BERT encoder → Z_at",
   "Extracting video keyframes (Top-8)",
   "Running ViT encoder → Z_v",
-  "Computing emotion heads A + B",
+  "Computing emotion heads A - B",
   "Computing discrepancy score Δ",
   "Bilinear fusion + classifier → P(fake)",
 ]
@@ -23,15 +23,35 @@ type DeltaItem = {
   severity: "Low" | "Moderate" | "High"
 }
 
+function computeDeltas(headA: { emotion: string; value: number }[], headB: { emotion: string; value: number }[]): DeltaItem[] {
+  const aMap: Record<string, number> = Object.fromEntries(headA.map(h => [h.emotion, h.value]))
+  const bMap: Record<string, number> = Object.fromEntries(headB.map(h => [h.emotion, h.value]))
+  const emotions = Array.from(new Set([...headA.map(h => h.emotion), ...headB.map(h => h.emotion)]))
+
+  return emotions.map(emotion => {
+    const a = aMap[emotion] ?? 0
+    const b = bMap[emotion] ?? 0
+    let delta = Math.abs(a - b)
+    // clamp to [0,1]
+    delta = Math.max(0, Math.min(1, delta))
+
+    let severity: DeltaItem["severity"] = "Low"
+    if (delta > 0.4) severity = "High"
+    else if (delta > 0.1) severity = "Moderate"
+
+    return { emotion, delta, severity }
+  })
+}
+
 const REAL_DATA = {
   score: 12,
   label: "Likely authentic",
   subtitle: "Emotions are consistent across audio and visual modalities.",
   mismatch: {
     emotion: "Happy",
-    delta: 0.08,
+    delta: 0.17,
     description: "audio says happy, face says happy · low mismatch signal",
-    percentage: 8,
+    percentage: 17,
   },
   headA: [
     { emotion: "Angry", value: 0.03, highlight: false },
@@ -51,11 +71,11 @@ const REAL_DATA = {
   ],
   deltas: [
     { emotion: "Angry", delta: 0.01, severity: "Low" },
-    { emotion: "Happy", delta: 0.08, severity: "Low" },
+    { emotion: "Happy", delta: 0.17, severity: "Moderate" },
     { emotion: "Sad", delta: 0.02, severity: "Low" },
-    { emotion: "Neutral", delta: 0.04, severity: "Low" },
-    { emotion: "Fearful", delta: 0.01, severity: "Low" },
-    { emotion: "Disgust", delta: 0.01, severity: "Low" },
+    { emotion: "Neutral", delta: 0.14, severity: "Moderate" },
+    { emotion: "Fearful", delta: 0.0, severity: "Low" },
+    { emotion: "Disgust", delta: 0.0, severity: "Low" },
   ] as DeltaItem[],
 }
 
@@ -65,9 +85,9 @@ const FAKE_DATA = {
   subtitle: "Strong emotional mismatch detected across modalities.",
   mismatch: {
     emotion: "Angry",
-    delta: 0.65,
+    delta: 0.78,
     description: "audio says angry, face says happy · high fake signal",
-    percentage: 65,
+    percentage: 78,
   },
   headA: [
     { emotion: "Angry", value: 0.78, highlight: true },
@@ -86,12 +106,12 @@ const FAKE_DATA = {
     { emotion: "Disgust", value: 0.01, highlight: false },
   ],
   deltas: [
-    { emotion: "Angry", delta: 0.12, severity: "Low" },
-    { emotion: "Happy", delta: 0.72, severity: "High" },
-    { emotion: "Sad", delta: 0.05, severity: "Low" },
-    { emotion: "Neutral", delta: 0.41, severity: "Moderate" },
-    { emotion: "Fearful", delta: 0.08, severity: "Low" },
-    { emotion: "Disgust", delta: 0.15, severity: "Low" },
+    { emotion: "Angry", delta: 0.73, severity: "High" },
+    { emotion: "Happy", delta: 0.78, severity: "High" },
+    { emotion: "Sad", delta: 0.02, severity: "Low" },
+    { emotion: "Neutral", delta: 0.02, severity: "Low" },
+    { emotion: "Fearful", delta: 0.01, severity: "Low" },
+    { emotion: "Disgust", delta: 0.0, severity: "Low" },
   ] as DeltaItem[],
 }
 
@@ -294,6 +314,22 @@ export function DeepSentinel() {
 
   const resultType: ResultType = runCount % 2 === 0 ? "real" : "fake"
   const resultData = resultType === "real" ? REAL_DATA : FAKE_DATA
+
+  // Compute deltas from the two heads instead of using hardcoded mock values
+  const computedDeltas = computeDeltas(resultData.headA, resultData.headB)
+
+  // Dominant mismatch: pick the emotion with the largest delta
+  const dominant = computedDeltas.reduce((best, cur) => (cur.delta > best.delta ? cur : best), computedDeltas[0] ?? { emotion: "", delta: 0, severity: "Low" })
+
+  const topA = resultData.headA.reduce((best, cur) => (cur.value > best.value ? cur : best), resultData.headA[0])
+  const topB = resultData.headB.reduce((best, cur) => (cur.value > best.value ? cur : best), resultData.headB[0])
+
+  const mismatchComputed = {
+    emotion: dominant.emotion || topA?.emotion || topB?.emotion || "",
+    delta: dominant.delta ?? 0,
+    percentage: Math.round(Math.min((dominant.delta ?? 0) * 100, 100)),
+    description: `audio says ${topA?.emotion ?? "?"}, face says ${topB?.emotion ?? "?"} · ${dominant.delta > 0.4 ? "high fake signal" : "low mismatch signal"}`,
+  }
 
   const handleFileSelect = useCallback(() => {
     setFileName("sample_video.mp4 · 156 MB")
