@@ -14,7 +14,7 @@
 > - [docs/FEW_SHOT_ADAPTATION_AND_DEFENSE_STRATEGY.md](file:///d:/Documents/Programming/Thesis_G10/docs/FEW_SHOT_ADAPTATION_AND_DEFENSE_STRATEGY.md) — Pre-sampling identity shield ($A \cap B = \emptyset$) & academic rationale.
 > - [docs/TOOL_DEFENSE_AND_SYSTEM_VULNERABILITY_AUDIT.md](file:///d:/Documents/Programming/Thesis_G10/docs/TOOL_DEFENSE_AND_SYSTEM_VULNERABILITY_AUDIT.md) — Vulnerability inventory & top 15 oral defense answers.
 > - [docs/architecture_decision_report.md](file:///d:/Documents/Programming/Thesis_G10/docs/architecture_decision_report.md) — Exhaustive development logs, 4-Trial Empirical Comparison, & Post-Mortem.
-> - [docs/multi_model_evaluation_postmortem.md](file:///d:/Documents/Programming/Thesis_G10/docs/multi_model_evaluation_postmortem.md) — 3-Way AI Peer Review Synthesis (DeepSeek-R1, Frontier Reasoning LLM, Antigravity) with 21 academic references.
+> - [docs/multi_model_evaluation_postmortem.md](docs/multi_model_evaluation_postmortem.md) — Multi-Model AI Peer Review Synthesis (DeepSeek-R1, Frontier Reasoning LLM, Antigravity) with 21 academic references.
 > - [docs/antigravity_review.md](file:///d:/Documents/Programming/Thesis_G10/docs/antigravity_review.md) — Deep-dive mathematical & calibration review.
 
 ---
@@ -293,9 +293,9 @@ For each raw video clip:
 
 ---
 
-## 13. Multi-Model Peer Review Consensus (DeepSeek, Frontier LLMs, Antigravity)
+## 13. Multi-Model Peer Review Consensus (DeepSeek-R1, Frontier Systems, Antigravity)
 
-Three independent AI systems (DeepSeek-R1, Frontier Reasoning LLM, Antigravity) reviewed the architecture and metrics. Their mathematical consensus:
+Independent frontier reasoning systems (DeepSeek-R1, Frontier LLMs, Antigravity) reviewed the architecture and metrics. Their mathematical consensus:
 
 1. **Covariate Shift is Real & Catastrophic:** Evaluating Phase 2 fine-tuned heads on Phase 1 base features causes extreme logit collapse due to CBP quadratic expansion ($z_{at} \otimes z_v$) and LayerNorm co-adaptation.
 2. **AUC Governs the Performance Ceiling:** Under the binormal ROC model, at $\text{AUC} \approx 0.58$, the maximum simultaneously achievable $\text{TPR} = \text{TNR}$ is only **$55.7\%$**. Moving the threshold cannot compensate for low AUC; the underlying representations must be separated using Margin Loss and deeper backbone adaptation.

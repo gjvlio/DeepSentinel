@@ -86,9 +86,7 @@ deploy/hf_repo/
 .DS_Store
 Thumbs.db
 
-# =============================================================================
-# Local machine configuration
-# =============================================================================
+# Local machine config
 *.local.json
 *.lock
 /knowledge
