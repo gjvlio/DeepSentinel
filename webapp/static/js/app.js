@@ -180,7 +180,7 @@
     if (logicalPath.startsWith("/about")) document.querySelector(".nav-dropdown-toggle")?.classList.add("active");
     if (logicalPath === "/benchmarks") document.querySelector('.nav-link[href="/benchmarks"]')?.classList.add("active");
 
-    document.body.classList.toggle("no-scroll", view === "landing" || view === "about-thesis");
+    document.body.classList.toggle("no-scroll", view === "landing");
     if (view !== "analyzing") stopAnalyzingHUD();
     if (view === "upload") resetUpload();
     if (view === "about-researchers") renderTeam();
@@ -353,7 +353,6 @@
   const cropDurationPill = document.getElementById("crop-duration-pill");
   const cropFileInfo = document.getElementById("crop-file-info");
   const changeVideoBtn = document.getElementById("change-video-btn");
-  const previewClipBtn = document.getElementById("preview-clip-btn");
   const preset10s = document.getElementById("preset-10s");
   const preset20s = document.getElementById("preset-20s");
   const presetMiddle = document.getElementById("preset-middle");
@@ -406,9 +405,9 @@
     if (handleLeft) handleLeft.style.left = `${leftPct}%`;
     if (handleRight) handleRight.style.left = `${rightPct}%`;
 
-    startTimeVal.textContent = fmtTime(cropStart);
-    endTimeVal.textContent = fmtTime(cropEnd);
-    playerClipRange.textContent = `${fmtTime(cropStart)} – ${fmtTime(cropEnd)}`;
+    if (startTimeVal) startTimeVal.textContent = fmtTime(cropStart);
+    if (endTimeVal) endTimeVal.textContent = fmtTime(cropEnd);
+    if (playerClipRange) playerClipRange.textContent = `${fmtTime(cropStart)} – ${fmtTime(cropEnd)}`;
 
     const dur = cropEnd - cropStart;
     const isValid = dur >= 2.95 && dur <= 20.05;
@@ -510,9 +509,16 @@
     URL.revokeObjectURL(blobUrl);
   }
 
-  // Paint active playback frame to filmstrip
+  // Paint active playback frame to filmstrip & hover tooltip
   cropVideo?.addEventListener("seeked", () => {
-    if (!cropVideo || !filmstripCanvas || !totalDuration || cropVideo.readyState < 2) return;
+    if (!cropVideo || cropVideo.readyState < 2) return;
+    if (timelineHoverCard?.classList.contains("is-visible") && hoverCanvas) {
+      try {
+        const hCtx = hoverCanvas.getContext("2d");
+        hCtx.drawImage(cropVideo, 0, 0, hoverCanvas.width, hoverCanvas.height);
+      } catch (e) {}
+    }
+    if (!filmstripCanvas || !totalDuration) return;
     try {
       const ctx = filmstripCanvas.getContext("2d");
       const trackW = filmstripCanvas.width;
@@ -533,17 +539,26 @@
 
     timelineHoverCard.style.left = `${localX}px`;
     timelineHoverCard.classList.add("is-visible");
-    hoverTimeBadge.textContent = fmtTime(timeSec);
+    if (hoverTimeBadge) hoverTimeBadge.textContent = fmtTime(timeSec);
 
-    // Instant zero-latency render from filmstrip canvas
-    if (filmstripCanvas && hoverCanvas) {
+    // Instant zero-latency render from active video or filmstrip canvas
+    if (hoverCanvas) {
       const hCtx = hoverCanvas.getContext("2d");
-      const pct = totalDuration > 0 ? Math.max(0, Math.min(1, timeSec / totalDuration)) : 0;
-      const srcW = Math.max(30, filmstripCanvas.width / 8);
-      const srcX = Math.max(0, Math.min(filmstripCanvas.width - srcW, pct * filmstripCanvas.width - srcW / 2));
-      try {
-        hCtx.drawImage(filmstripCanvas, srcX, 0, srcW, filmstripCanvas.height, 0, 0, hoverCanvas.width, hoverCanvas.height);
-      } catch (e) {}
+      let painted = false;
+      if (cropVideo && cropVideo.readyState >= 2 && Math.abs(cropVideo.currentTime - timeSec) < 1.0) {
+        try {
+          hCtx.drawImage(cropVideo, 0, 0, hoverCanvas.width, hoverCanvas.height);
+          painted = true;
+        } catch (e) {}
+      }
+      if (!painted && filmstripCanvas && filmstripCanvas.width > 0) {
+        const pct = totalDuration > 0 ? Math.max(0, Math.min(1, timeSec / totalDuration)) : 0;
+        const srcW = Math.max(30, filmstripCanvas.width / 8);
+        const srcX = Math.max(0, Math.min(filmstripCanvas.width - srcW, pct * filmstripCanvas.width - srcW / 2));
+        try {
+          hCtx.drawImage(filmstripCanvas, srcX, 0, srcW, filmstripCanvas.height, 0, 0, hoverCanvas.width, hoverCanvas.height);
+        } catch (e) {}
+      }
     }
   }
 
@@ -578,7 +593,7 @@
     if (mode === "right") handleRight?.classList.add("is-dragging");
     if (mode === "window") timelineWindow?.classList.add("is-panning");
 
-    showHoverPreview(e.clientX, mode === "left" ? cropStart : mode === "right" ? cropEnd : (cropStart + cropEnd) / 2);
+    showHoverPreview(e.clientX, mode === "left" ? cropStart : mode === "right" ? cropEnd : cropStart);
 
     const onPointerMove = (ev) => {
       if (!isDragging) return;
@@ -618,7 +633,7 @@
         cropEnd = Math.round((newStart + dur) * 10) / 10;
         updateTimelineUI();
         cropVideo.currentTime = cropStart;
-        showHoverPreview(ev.clientX, (cropStart + cropEnd) / 2);
+        showHoverPreview(ev.clientX, cropStart);
       }
     };
 
@@ -829,19 +844,6 @@
     }
   });
 
-  // Preview Clip (plays only [cropStart, cropEnd])
-  previewClipBtn?.addEventListener("click", () => {
-    clearInterval(previewTimer);
-    cropVideo.currentTime = cropStart;
-    cropVideo.play();
-    previewTimer = setInterval(() => {
-      if (cropVideo.currentTime >= cropEnd) {
-        cropVideo.pause();
-        cropVideo.currentTime = cropStart;
-        clearInterval(previewTimer);
-      }
-    }, 50);
-  });
 
   const showError = (m) => { uploadError.textContent = m; uploadError.hidden = false; };
   const hideError = () => (uploadError.hidden = true);
@@ -1287,8 +1289,8 @@
 
         // 6. Top tag on Bounding Box
         const topLabelText = insightFaceKeyframes.length > 0 
-          ? (cssW < 420 ? "RETINAFACE" : "INSIGHTFACE · RETINAFACE")
-          : (cssW < 420 ? "ViT FRAME" : "FACE #01 · ViT KEYFRAME");
+          ? (cssW < 420 ? "KEYFRAME" : "FACE KEYFRAME")
+          : (cssW < 420 ? "FACE" : "FACE DETECTED");
         ctx.font = "600 9px monospace";
         const topTextW = ctx.measureText(topLabelText).width;
         ctx.fillStyle = "rgba(11, 15, 23, 0.85)";
@@ -1298,52 +1300,6 @@
         ctx.strokeRect(x, y - 18, topTextW + 10, 16);
         ctx.fillStyle = "#3df3d8";
         ctx.fillText(topLabelText, x + 5, y - 6);
-
-        // 7. Live Emotion Detection Badge Attached to Box (Placed safely so never clipped)
-        let shortEmo = emoLabel;
-        if (cssW < 420 && shortEmo.length > 10) {
-          if (shortEmo.toLowerCase().includes("vit")) shortEmo = "ViT";
-          else if (shortEmo.toLowerCase().includes("retina")) shortEmo = "RetinaFace";
-          else if (shortEmo.toLowerCase().includes("listen")) shortEmo = "Listening";
-        }
-        const emoPillText = cssW < 420
-          ? `${shortEmo.toUpperCase()} ${emoConf.toFixed(0)}%`
-          : `EMOTION: ${shortEmo.toUpperCase()} ${emoConf.toFixed(0)}%`;
-        ctx.font = cssW < 420 ? "700 9.5px monospace" : "700 10.5px monospace";
-        const emoPillW = ctx.measureText(emoPillText).width + (cssW < 420 ? 14 : 18);
-        const emoPillX = Math.max(drawX + 4, Math.min(drawX + drawW - emoPillW - 4, x + bw - emoPillW));
-        // Place above the box if room, otherwise inside or below without colliding with bottom telemetry pill
-        let emoPillY = y - 26;
-        if (emoPillY < drawY + 6) {
-          if (y + bh + 28 <= cssH - 60) {
-            emoPillY = y + bh + 8;
-          } else {
-            emoPillY = Math.max(drawY + 6, y + 6);
-          }
-        }
-        // Strict boundary clamp so it NEVER collides with bottom telemetry pill (occupies bottom 10-48px)
-        emoPillY = Math.max(drawY + 4, Math.min(cssH - 72, emoPillY));
-
-        const pillH = cssW < 420 ? 18 : 22;
-        ctx.fillStyle = "rgba(11, 15, 23, 0.92)";
-        ctx.beginPath();
-        ctx.roundRect(emoPillX, emoPillY, emoPillW, pillH, 5);
-        ctx.fill();
-
-        ctx.strokeStyle = emoColor;
-        ctx.lineWidth = 1.2;
-        ctx.shadowColor = emoColor;
-        ctx.shadowBlur = 6;
-        ctx.stroke();
-        ctx.shadowBlur = 0;
-
-        ctx.fillStyle = emoColor;
-        ctx.beginPath();
-        ctx.arc(emoPillX + (cssW < 420 ? 7 : 9), emoPillY + (cssW < 420 ? 9 : 11), cssW < 420 ? 2.5 : 3.5, 0, Math.PI * 2);
-        ctx.fill();
-
-        ctx.fillStyle = "#ffffff";
-        ctx.fillText(emoPillText, emoPillX + (cssW < 420 ? 13 : 18), emoPillY + (cssW < 420 ? 12.5 : 15));
 
         // Smooth asymptotic progress interpolation towards targetProgressPct
         if (currentRenderedPct < targetProgressPct) {
@@ -1393,11 +1349,6 @@
             loaderArc.style.strokeDashoffset = offset.toFixed(1);
           }
         }
-
-        ctx.font = "500 10px monospace";
-        ctx.fillStyle = "rgba(255, 255, 255, 0.55)";
-        ctx.fillText(`CROP: [${fmtTime(startSec)} - ${fmtTime(endSec)}]`, 12, 18);
-        ctx.fillText(`FPS: 29.97 · FACS AU: SALIENT`, 12, 32);
       }
 
       ctx.restore();
@@ -1837,8 +1788,10 @@
     const card = document.getElementById("verdict-card");
     card.classList.toggle("fake", isFake);
     card.classList.toggle("real", !isFake);
-    document.getElementById("verdict-tag").textContent = isFake ? "Fake" : "Real";
-    document.getElementById("verdict-label").textContent = isFake ? "Likely deepfake" : "Likely authentic";
+    document.getElementById("verdict-tag").textContent = isFake ? "High Risk" : "Low Risk";
+    document.getElementById("verdict-label").textContent = isFake
+      ? "Deepfake Risk · Likely deepfake"
+      : "Deepfake Risk · Likely authentic";
 
     const emoA = (r.audio_text_emotion?.label || "").toLowerCase();
     const emoB = (r.visual_emotion?.label || "").toLowerCase();
@@ -2295,24 +2248,23 @@
     mail: `<svg viewBox="0 0 24 24" fill="none"><rect x="3" y="5" width="18" height="14" rx="3" stroke="currentColor" stroke-width="1.5"/><path d="M4 7l8 6 8-6" stroke="currentColor" stroke-width="1.5" stroke-linecap="round"/></svg>`,
   };
   const TEAM = [
-    { name: "Geuel John D. Rivera", role: "Project Leader", cv: "#", photo: "/static/img/el.png",
+    { name: "Geuel John D. Rivera", role: "Project Leader", photo: "/static/img/el.png",
       bio: "Led overall coordination and system integration, and owns the detection module — the emotion heads, discrepancy score Δ, compact bilinear fusion, and the classifier.",
-      socials: [{ t: "linkedin", href: "https://www.linkedin.com/in/geuel-john-d-rivera-24a853292/" }, { t: "github", href: "https://github.com/gjvlio" }, { t: "mail", href: "#" }] },
-    { name: "Shikina Y. Cabral", role: "Data Generation Lead", cv: "#", photo: "/static/img/kina.png",
+      socials: [{ t: "linkedin", href: "https://www.linkedin.com/in/geuel-john-d-rivera-24a853292/" }, { t: "github", href: "https://github.com/gjvlio" }] },
+    { name: "Shikina Y. Cabral", role: "Data Generation Lead", photo: "/static/img/kina.png",
       bio: "Built the four-track deepfake generation pipeline using StyleTTS2, RVC, Wav2Lip, SadTalker, and MuseTalk to produce the labelled training corpus.",
-      socials: [{ t: "linkedin", href: "https://www.linkedin.com/in/shikina-cabral-97826027a/" }, { t: "github", href: "https://github.com/CShikina" }, { t: "link", href: "#" }] },
-    { name: "John Christian B. Caparas", role: "Preprocessing Lead", cv: "#", photo: "/static/img/jc.png",
+      socials: [{ t: "linkedin", href: "https://www.linkedin.com/in/shikina-cabral-97826027a/" }, { t: "github", href: "https://github.com/CShikina" }] },
+    { name: "John Christian B. Caparas", role: "Preprocessing Lead", photo: "/static/img/jc.png",
       bio: "Owns feature extraction — Wav2Vec 2.0, BERT, and the Vision Transformer — plus face detection, keyframe selection, and the cached feature store.",
-      socials: [{ t: "linkedin", href: "#" }, { t: "github", href: "https://github.com/JJEEYYSSEE" }, { t: "mail", href: "#" }] },
-    { name: "Matan John B. Exonde", role: "Evaluation Lead", cv: "#", photo: "/static/img/matan.png",
+      socials: [{ t: "linkedin", href: "https://www.linkedin.com/in/john-christian-caparas/" }, { t: "github", href: "https://github.com/JJEEYYSSEE" }] },
+    { name: "Matan John B. Exonde", role: "Evaluation Lead", photo: "/static/img/matan.png",
       bio: "Handles training orchestration, benchmarking on unseen data, statistical significance testing, and the project documentation.",
-      socials: [{ t: "linkedin", href: "https://www.linkedin.com/in/matan-john-banzuelo-exconde-83612029a/" }, { t: "github", href: "https://github.com/Enami345" }, { t: "link", href: "#" }] },
+      socials: [{ t: "linkedin", href: "https://www.linkedin.com/in/matan-john-banzuelo-exconde-83612029a/" }, { t: "github", href: "https://github.com/Enami345" }] },
   ];
 
   function renderTeam() {
     const grid = document.getElementById("team-grid");
     if (grid.dataset.filled) return;
-    const cvIcon = `<svg width="15" height="15" viewBox="0 0 16 16" fill="none"><path d="M8 2v8m0 0l3-3m-3 3L5 7M3 13h10" stroke="currentColor" stroke-width="1.6" stroke-linecap="round" stroke-linejoin="round"/></svg>`;
     const xIcon = `<svg viewBox="0 0 24 24" fill="none"><path d="M6 6l12 12M18 6L6 18" stroke="currentColor" stroke-width="1.7" stroke-linecap="round"/></svg>`;
     grid.innerHTML = TEAM.map((m, i) => `
       <div class="tcard" data-idx="${i}">
@@ -2328,7 +2280,6 @@
             <p class="td-bio">${m.bio}</p>
             <div class="td-socials">${(m.socials || []).map((s) =>
               `<a class="social-btn" href="${s.href}" aria-label="${s.t}"${s.href === "#" ? "" : ' target="_blank" rel="noopener"'}>${SOCIAL_ICONS[s.t] || SOCIAL_ICONS.link}</a>`).join("")}</div>
-            <a class="btn btn-primary magnetic td-cv" href="${m.cv}"${m.cv === "#" ? "" : " download"}>${cvIcon}<span>Download CV</span></a>
           </div>
         </div>
       </div>`).join("");
