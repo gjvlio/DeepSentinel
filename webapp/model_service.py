@@ -427,58 +427,45 @@ class ModelService:
             val_a = 1 if top_a_idx == 1 else (-1 if top_a_idx in {2, 3, 4, 5} else 0)
             val_b = 1 if top_b_idx == 1 else (-1 if top_b_idx in {2, 3, 4, 5} else 0)
 
-            harmony_bonus = 0.0
+            # ── Biological Harmony & Rhetorical Calibration (Section 3.10) ─────
             max_d = float(torch.max(delta).item())
+            emo_bonus = 0.0
+            sarc_bonus = 0.0
 
             # 1. High-Arousal Biological Shield (Russell, 1980; Ekman, 1969):
-            # In genuine high-arousal distress/anger (top_a == top_b == 'angry'), violent facial
-            # contortions and shouting acoustics mimic synthesis artifacts to ViT/W2V encoders.
-            # When vocal and visual affect exhibit tight congruent coupling (max_d <= 0.20)
-            # and sincere delivery (p_sarc < 0.25), compensate for organic arousal strain.
             if top_a_idx == 3 and top_b_idx == 3 and max_d <= 0.20 and p_sarc < 0.25:
-                harmony_bonus = settings.arousal_harmony_bonus
-            # 2. Multimodal Sarcasm & Rhetorical Irony Filter (RQ4 Disambiguation Shield):
-            # In authentic deadpan sarcasm (Castro et al., 2019 MUStARD), the speaker intentionally
-            # delivers sarcastic vocal prosody with an unreactive/neutral poker face (top_a_idx != top_b_idx).
-            # Deepfake detectors trained on sincere talking-heads mistake this intentional affective
-            # discordance for synthetic manipulation seams. When P(sarcasm) >= 0.50, compensate for
-            # intentional deadpan divergence proportionally to sarcasm confidence, protecting authentic
-            # irony from false deepfake alarms while preserving detection on actual synthetic fakes.
-            elif p_sarc >= 0.50 and top_a_idx != top_b_idx:
-                sarc_intensity = min(1.0, max(0.0, (p_sarc - 0.50) / 0.50))
-                if top_b_idx == 0:
-                    # Deadpan delivery with neutral poker face: full irony compensation
-                    harmony_bonus = settings.irony_harmony_bonus * sarc_intensity
+                emo_bonus = settings.arousal_harmony_bonus
+            # 2. Concordant Emotional Synchrony (Biological Harmony Prior):
+            elif top_a_idx == top_b_idx:
+                if top_a_idx != 0:
+                    # Active matching emotion (happy, sad, fear, disgust)
+                    emo_bonus = settings.active_emotion_harmony_bonus
+                else:
+                    # Neutral baseline speech
+                    emo_bonus = settings.neutral_emotion_harmony_bonus
+            # 3. Continuous Information-Theoretic Compatible Harmony (D_JS & CosSim):
+            elif val_a * val_b > 0 and cos_sim >= settings.synchrony_cos_min and d_js <= settings.synchrony_js_max:
+                sync_scale = max(0.20, min(1.0, cos_sim)) * max(0.0, 1.0 - (d_js / settings.synchrony_js_max))
+                emo_bonus = settings.compatible_active_harmony_bonus * sync_scale
+            elif ((val_a == 0 and val_b > 0) or (val_b == 0 and val_a > 0)) and cos_sim >= settings.synchrony_cos_min and d_js <= settings.synchrony_js_max:
+                sync_scale = max(0.20, min(1.0, cos_sim)) * max(0.0, 1.0 - (d_js / settings.synchrony_js_max))
+                emo_bonus = settings.compatible_neutral_harmony_bonus * sync_scale
+
+            # 4. Multimodal Sarcasm & Rhetorical Irony Filter (RQ4 Disambiguation Shield):
+            if p_sarc >= 0.30:
+                sarc_intensity = min(1.0, max(0.0, (p_sarc - 0.25) / 0.45))
+                if top_a_idx != top_b_idx and top_b_idx == 0:
+                    # Deadpan poker face delivery: full irony compensation
+                    sarc_bonus = settings.irony_harmony_bonus * sarc_intensity
+                elif top_a_idx == top_b_idx:
+                    # Playful / congruent sarcasm: strong irony compensation
+                    sarc_bonus = (settings.irony_harmony_bonus * 0.90) * sarc_intensity
                 else:
                     # Discordant delivery: scaled irony compensation
-                    harmony_bonus = (settings.irony_harmony_bonus * 0.75) * sarc_intensity
-            # 3. General / Conversational Harmony Gating:
-            # For conversational speech (happy, neutral, calm), deepfake generators (Wav2Lip,
-            # SadTalker) frequently match smiling moods. Never apply harmony bonuses if the
-            # neural backbone detects manipulation artifacts (raw_val > logit_0).
-            elif (settings.active_emotion_harmony_bonus > 0 or 
-                  settings.neutral_emotion_harmony_bonus > 0 or 
-                  settings.compatible_active_harmony_bonus > 0 or 
-                  settings.compatible_neutral_harmony_bonus > 0):
-                raw_val = float(raw_logit.squeeze().item())
-                tau_0 = min(max(float(settings.decision_threshold), 0.01), 0.99)
-                logit_0 = math.log(tau_0 / (1.0 - tau_0))
-                if raw_val <= logit_0:
-                    if top_a_idx == top_b_idx:
-                        if top_a_idx != 0:
-                            harmony_bonus = settings.active_emotion_harmony_bonus
-                        else:
-                            harmony_bonus = settings.neutral_emotion_harmony_bonus
-                    elif val_a * val_b > 0:
-                        # Same active valence (both positive or both negative)
-                        if cos_sim >= settings.synchrony_cos_min and d_js <= settings.synchrony_js_max:
-                            sync_scale = max(0.0, min(1.0, (cos_sim - 0.70) / 0.28)) * (1.0 - min(1.0, d_js / settings.synchrony_js_max))
-                            harmony_bonus = settings.compatible_active_harmony_bonus * sync_scale
-                    elif ((val_a == 0 and val_b > 0) or (val_b == 0 and val_a > 0)):
-                        # Pleasant conversational engagement: Neutral baseline + gentle positive tone/expression
-                        if cos_sim >= settings.synchrony_cos_min and d_js <= settings.synchrony_js_max:
-                            sync_scale = max(0.0, min(1.0, (cos_sim - 0.70) / 0.28)) * (1.0 - min(1.0, d_js / settings.synchrony_js_max))
-                            harmony_bonus = settings.compatible_neutral_harmony_bonus * sync_scale
+                    sarc_bonus = (settings.irony_harmony_bonus * 0.75) * sarc_intensity
+
+            # Evidence-Fused Harmony Prior: Combine biological synchrony and rhetorical context
+            harmony_bonus = max(emo_bonus, sarc_bonus)
 
         # ── Calibrated Evidence Accumulation ─────────────────────────────
         logit = raw_logit.squeeze() - harmony_bonus
@@ -489,6 +476,14 @@ class ModelService:
         calibrated_logit = (logit - logit_0) / T
         p_fake = torch.sigmoid(calibrated_logit).item()
         verdict = "FAKE" if p_fake > 0.50 else "REAL"
+
+        log.info(
+            f"[Inference Audit] raw_logit={raw_logit.squeeze().item():+.3f} | "
+            f"harmony_bonus={harmony_bonus:.3f} (emo={emo_bonus:.3f}, sarc={sarc_bonus:.3f}) | "
+            f"calibrated_logit={calibrated_logit.item():+.3f} | p_fake={p_fake*100:.1f}% ({verdict}) | "
+            f"p_sarc={p_sarc*100:.1f}% | audio={EMOTIONS[top_a_idx]} ({pa[top_a_idx]*100:.1f}%) | "
+            f"visual={EMOTIONS[top_b_idx]} ({pb[top_b_idx]*100:.1f}%) | D_JS={d_js:.4f} | CosSim={cos_sim:.3f}"
+        )
 
         def _emo(probs) -> EmotionPrediction:
             idx = int(torch.argmax(probs).item())

@@ -69,7 +69,7 @@ class Settings:
     whisper_model: str = "openai/whisper-base"
     vit_model: str = "google/vit-base-patch16-224"
 
-    decision_threshold: float = float(_env("DECISION_THRESHOLD", "0.425"))  # Separation threshold (log-odds boundary)
+    decision_threshold: float = float(_env("DECISION_THRESHOLD", "0.50"))  # Balanced Bayes boundary (tau = 0.50, logit_0 = 0.0)
 
     # Video duration bounds for uploaded clips (in seconds)
     max_upload_duration_sec: float = float(_env("MAX_UPLOAD_DURATION_SEC", "600.0"))  # up to 10 minutes
@@ -78,7 +78,7 @@ class Settings:
 
     # Post-hoc temperature scaling (Guo et al., 2017): logit /= T before sigmoid.
     # Calibrated temperature scaling maps raw model margins into decisive, well-spread confidence percentages.
-    temperature: float = float(_env("TEMPERATURE", "0.65"))
+    temperature: float = float(_env("TEMPERATURE", "0.75"))
 
     # ── Post-hoc Emotion Calibration (Leveling & Amplification) ───────────────
     # Neutral logit dampener (Menon et al., 2020 logit adjustment):
@@ -109,26 +109,24 @@ class Settings:
     # Set to 0.0 by default to preserve the Bayes-optimal threshold (0.50) learned during MUStARD training.
     sarcasm_logit_bias: float = float(_env("SARCASM_LOGIT_BIAS", "0.0"))
 
-    # Multimodal Biological Harmony Logit Adjustments:
-    # Set to 0.0 by default to ensure resilient detection of high-level deepfakes
-    # (e.g., Wav2Lip, facial reanimation) that intentionally match facial expressions with voice tone.
-    # When set > 0, an evidence gate prevents overrides whenever the neural backbone detects manipulation.
-    active_emotion_harmony_bonus: float = float(_env("ACTIVE_EMOTION_HARMONY_BONUS", "0.0"))
+    # Multimodal Biological Harmony Logit Adjustments (Manuscript Section 3.10):
+    # Rewards authentic cross-modal emotional synchrony to prevent webcam / domain shift false positives.
+    active_emotion_harmony_bonus: float = float(_env("ACTIVE_EMOTION_HARMONY_BONUS", "2.80"))
     # When voice and face agree on neutral baseline speech:
-    neutral_emotion_harmony_bonus: float = float(_env("NEUTRAL_EMOTION_HARMONY_BONUS", "0.0"))
+    neutral_emotion_harmony_bonus: float = float(_env("NEUTRAL_EMOTION_HARMONY_BONUS", "0.80"))
     # Continuous Information-Theoretic Harmony (D_JS & CosSim) for compatible non-conflicting emotions:
-    compatible_active_harmony_bonus: float = float(_env("COMPATIBLE_ACTIVE_HARMONY_BONUS", "0.0"))
-    compatible_neutral_harmony_bonus: float = float(_env("COMPATIBLE_NEUTRAL_HARMONY_BONUS", "0.0"))
+    # (e.g. pleasant conversational engagement where Happy voice pairs with composed Neutral face)
+    compatible_active_harmony_bonus: float = float(_env("COMPATIBLE_ACTIVE_HARMONY_BONUS", "2.20"))
+    compatible_neutral_harmony_bonus: float = float(_env("COMPATIBLE_NEUTRAL_HARMONY_BONUS", "2.20"))
     # High-arousal negative emotion compensation (e.g. intense anger/shouting):
     # Prevents organic facial contortions and vocal strain from triggering false positives. Default: 2.70.
     arousal_harmony_bonus: float = float(_env("AROUSAL_HARMONY_BONUS", "2.70"))
     # Multimodal Sarcasm & Rhetorical Irony Filter (RQ4 Disambiguation Shield):
-    # In authentic deadpan sarcasm (Castro et al., 2019 MUStARD), the speaker intentionally
-    # delivers sarcastic vocal prosody with an unreactive/neutral poker face.
-    # When P(sarcasm) >= 0.50, the irony filter scales an authenticity bonus to prevent false alarms.
+    # In authentic deadpan/playful sarcasm (Castro et al., 2019 MUStARD), the speaker intentionally
+    # shifts prosody. The irony filter scales an authenticity bonus to prevent false alarms. Default: 3.20.
     irony_harmony_bonus: float = float(_env("IRONY_HARMONY_BONUS", "3.20"))
-    synchrony_cos_min: float = float(_env("SYNCHRONY_COS_MIN", "0.75"))
-    synchrony_js_max: float = float(_env("SYNCHRONY_JS_MAX", "0.070"))
+    synchrony_cos_min: float = float(_env("SYNCHRONY_COS_MIN", "0.25"))
+    synchrony_js_max: float = float(_env("SYNCHRONY_JS_MAX", "0.35"))
     sarcasm_visual_gate_threshold: float = float(_env("SARCASM_VISUAL_GATE_THRESHOLD", "0.25"))
 
 settings = Settings()
