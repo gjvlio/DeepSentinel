@@ -135,7 +135,7 @@ def get_acoustic_embedding(
     model, processor = _load_wav2vec(model_name, device=device)
 
     waveform, sr = load_audio_waveform(wav_path, target_sr=16000)
-    max_samples = max_seconds * 16000
+    max_samples = int(max_seconds * 16000)
     if waveform.shape[0] > max_samples:
         waveform = waveform[:max_samples]
 

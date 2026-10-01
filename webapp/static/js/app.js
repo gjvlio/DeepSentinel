@@ -6,9 +6,13 @@
   if (urlParams.has("api")) localStorage.setItem("ds_api_base", urlParams.get("api"));
   if (urlParams.has("token")) localStorage.setItem("ds_hf_token", urlParams.get("token"));
 
-  const API_BASE = window.DEEPSENTINEL_API_BASE || localStorage.getItem("ds_api_base") || "";
+  const isLocalHost = window.location.hostname === "localhost" || window.location.hostname === "127.0.0.1" || window.location.hostname === "";
+  const API_BASE = urlParams.has("api")
+    ? (urlParams.get("api") || "")
+    : (isLocalHost ? "" : (window.DEEPSENTINEL_API_BASE || localStorage.getItem("ds_api_base") || ""));
+
   const getAuthHeaders = (headers = {}) => {
-    const token = window.DEEPSENTINEL_HF_TOKEN || localStorage.getItem("ds_hf_token") || "";
+    const token = window.DEEPSENTINEL_HF_TOKEN || (isLocalHost ? "" : localStorage.getItem("ds_hf_token")) || "";
     return token ? { ...headers, Authorization: `Bearer ${token}` } : headers;
   };
 

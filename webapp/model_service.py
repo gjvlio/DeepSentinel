@@ -28,6 +28,7 @@ from __future__ import annotations
 
 import logging
 import math
+import os
 import threading
 import time
 import uuid
@@ -292,7 +293,7 @@ class ModelService:
                 self._warmup_stage = "calibrating"
                 self._warmup_target = "Bilinear Fusion & Affective Attention"
                 self._warmup_progress = 0.98
-            dummy_at = torch.zeros(1, 1024, device=self.device)
+            dummy_at = torch.zeros(1, 1536, device=self.device)
             dummy_v = torch.zeros(1, 768, device=self.device)
             with torch.no_grad():
                 self.model._detect(dummy_at, dummy_v, has_speech=True)
@@ -337,11 +338,12 @@ class ModelService:
            Injects a gentle baseline floor (epsilon) so minority emotions (fear, disgust)
            are never crushed to 0.x%, ensuring every emotion remains legible and highlighted.
         """
-        bias_n = settings.neutral_logit_bias if neutral_bias is None else neutral_bias
-        if modality == "audio":
-            bias_s = settings.audio_sad_logit_bias if sad_bias is None else sad_bias
-        else:
+        if modality == "visual":
+            bias_n = getattr(settings, "visual_neutral_logit_bias", settings.neutral_logit_bias) if neutral_bias is None else neutral_bias
             bias_s = settings.visual_sad_logit_bias if sad_bias is None else sad_bias
+        else:
+            bias_n = settings.neutral_logit_bias if neutral_bias is None else neutral_bias
+            bias_s = settings.audio_sad_logit_bias if sad_bias is None else sad_bias
 
         T_base = max(float(settings.emotion_temperature if temperature is None else temperature), 0.01)
         eps = max(float(settings.emotion_floor_epsilon if floor_epsilon is None else floor_epsilon), 0.0)
@@ -431,6 +433,12 @@ class ModelService:
             max_d = float(torch.max(delta).item())
             emo_bonus = 0.0
             sarc_bonus = 0.0
+            raw_val = float(raw_logit.squeeze().item())
+
+            # Synthetic Artifact Damping (Manuscript Section 3.10):
+            # Heavy physical manipulation artifacts (raw_val > threshold) cannot be erased by rhetorical claims.
+            synth_thresh = float(getattr(settings, "synthetic_artifact_threshold", 2.40) or 2.40)
+            synth_damp = max(0.0, 1.0 - max(0.0, (raw_val - synth_thresh) / 0.80))
 
             # 1. High-Arousal Biological Shield (Russell, 1980; Ekman, 1969):
             if top_a_idx == 3 and top_b_idx == 3 and max_d <= 0.20 and p_sarc < 0.25:
@@ -443,26 +451,33 @@ class ModelService:
                 else:
                     # Neutral baseline speech
                     emo_bonus = settings.neutral_emotion_harmony_bonus
+                    # Anger & Arousal Synchrony Shield:
+                    if pa[3].item() >= 0.25 and pb[3].item() >= 0.12 and cos_sim >= 0.80 and raw_val < 1.60:
+                        emo_bonus = 1.35
             # 3. Continuous Information-Theoretic Compatible Harmony (D_JS & CosSim):
-            elif val_a * val_b > 0 and cos_sim >= settings.synchrony_cos_min and d_js <= settings.synchrony_js_max:
-                sync_scale = max(0.20, min(1.0, cos_sim)) * max(0.0, 1.0 - (d_js / settings.synchrony_js_max))
+            elif val_a * val_b > 0 and d_js <= settings.synchrony_js_max:
+                sync_scale = max(0.25, min(1.0, cos_sim)) * max(0.0, 1.0 - (d_js / settings.synchrony_js_max))
                 emo_bonus = settings.compatible_active_harmony_bonus * sync_scale
-            elif ((val_a == 0 and val_b > 0) or (val_b == 0 and val_a > 0)) and cos_sim >= settings.synchrony_cos_min and d_js <= settings.synchrony_js_max:
-                sync_scale = max(0.20, min(1.0, cos_sim)) * max(0.0, 1.0 - (d_js / settings.synchrony_js_max))
-                emo_bonus = settings.compatible_neutral_harmony_bonus * sync_scale
+            elif (val_a > 0 and val_b == 0) or (val_b > 0 and val_a == 0):
+                # Positive conversational engagement: Happy voice paired with composed baseline face
+                sync_scale = max(0.45, min(1.0, cos_sim)) * max(0.40, 1.0 - (d_js / 0.65))
+                emo_bonus = settings.compatible_neutral_harmony_bonus * sync_scale * max(0.20, synth_damp)
+            elif (val_a < 0 and val_b == 0) or (val_b < 0 and val_a == 0):
+                # Screaming/negative affect with motionless neutral face is an affective anomaly (typical of Wav2Lip synthesis)
+                emo_bonus = 0.0
 
             # 4. Multimodal Sarcasm & Rhetorical Irony Filter (RQ4 Disambiguation Shield):
-            if p_sarc >= 0.30:
-                sarc_intensity = min(1.0, max(0.0, (p_sarc - 0.25) / 0.45))
-                if top_a_idx != top_b_idx and top_b_idx == 0:
-                    # Deadpan poker face delivery: full irony compensation
-                    sarc_bonus = settings.irony_harmony_bonus * sarc_intensity
-                elif top_a_idx == top_b_idx:
-                    # Playful / congruent sarcasm: strong irony compensation
-                    sarc_bonus = (settings.irony_harmony_bonus * 0.90) * sarc_intensity
+            if p_sarc >= 0.35:
+                sarc_intensity = min(1.0, max(0.0, p_sarc / 0.50))
+                if top_a_idx == top_b_idx or (val_a > 0 and pb[1] > 0.15):
+                    # Playful / congruent sarcasm with matching smile
+                    sarc_bonus = settings.irony_harmony_bonus * sarc_intensity * max(0.25, synth_damp)
+                elif val_a >= 0 and top_b_idx == 0:
+                    # Deadpan poker face delivery: only valid when vocal delivery is non-aggressive (val_a >= 0)
+                    sarc_bonus = settings.irony_harmony_bonus * sarc_intensity * synth_damp
                 else:
-                    # Discordant delivery: scaled irony compensation
-                    sarc_bonus = (settings.irony_harmony_bonus * 0.75) * sarc_intensity
+                    # Discordant delivery
+                    sarc_bonus = (settings.irony_harmony_bonus * 0.40) * sarc_intensity * synth_damp
 
             # Evidence-Fused Harmony Prior: Combine biological synchrony and rhetorical context
             harmony_bonus = max(emo_bonus, sarc_bonus)
@@ -707,9 +722,6 @@ class ModelService:
                 log.debug(f"Duration check bypass: {e}")
 
         clip_id = clip_id or f"upload_{uuid.uuid4().hex[:12]}"
-        if meta.phase == 2 and getattr(self.model, "_backbones_loaded", False):
-            return self._predict_e2e(video_path, clip_id=clip_id, meta=meta)
-
         feats = self.pipeline.process(clip_id, video_path)
         if feats is None:
             raise ValueError("Preprocessing failed — could not extract features "
@@ -1057,8 +1069,6 @@ class ModelService:
         else:
             z_at = torch.load(z_at_path, weights_only=True)
 
-        is_e2e = meta.phase == 2 and getattr(self.model, "_backbones_loaded", False)
-
         yield {"step": 1, "status": "done", "transcript": transcript}
 
         # Step 2: Picking clearest face frames (InsightFace / RetinaFace)
@@ -1091,35 +1101,21 @@ class ModelService:
             "tech": "Vision Transformer",
             "status": "active",
         }
-        if is_e2e:
-            from src.preprocessing.visual import get_keyframe_pixels
-            keyframe_pixels = get_keyframe_pixels(
+        from src.preprocessing.visual import get_z_v
+        z_v_path = self.pipeline._z_v_path(clip_id)
+        if not z_v_path.exists():
+            z_v = get_z_v(
                 video_path,
                 vit_model_name=self.pipeline.vit_model,
                 detector=self.pipeline.face_detector,
                 n_keyframes=self.pipeline.n_keyframes,
                 frame_size=self.pipeline.frame_size,
                 target_fps=self.pipeline.target_fps,
-                motion_threshold=self.pipeline.motion_threshold,
-                confidence_threshold=self.pipeline.confidence_threshold,
                 device=self.device,
             )
+            torch.save(z_v, z_v_path)
         else:
-            from src.preprocessing.visual import get_z_v
-            z_v_path = self.pipeline._z_v_path(clip_id)
-            if not z_v_path.exists():
-                z_v = get_z_v(
-                    video_path,
-                    vit_model_name=self.pipeline.vit_model,
-                    detector=self.pipeline.face_detector,
-                    n_keyframes=self.pipeline.n_keyframes,
-                    frame_size=self.pipeline.frame_size,
-                    target_fps=self.pipeline.target_fps,
-                    device=self.device,
-                )
-                torch.save(z_v, z_v_path)
-            else:
-                z_v = torch.load(z_v_path, weights_only=True)
+            z_v = torch.load(z_v_path, weights_only=True)
         yield {"step": 3, "status": "done"}
 
         # Step 4: Comparing voice emotion vs face emotion
@@ -1130,20 +1126,9 @@ class ModelService:
             "tech": "Bilinear Fusion",
             "status": "active",
         }
-        if is_e2e:
-            z_at_t = z_at.unsqueeze(0).float().to(self.device)
-            out = self.model(
-                audio_values=audio_values,
-                input_ids=input_ids,
-                attention_mask=attention_mask,
-                keyframe_pixels=keyframe_pixels,
-                z_at_emo=z_at_t,
-                has_speech=has_speech,
-            )
-        else:
-            z_at_t = z_at.unsqueeze(0).float().to(self.device)
-            z_v_t = z_v.unsqueeze(0).float().to(self.device)
-            out = self.model.forward_from_features(z_at_t, z_v_t, z_at_emo=z_at_t, has_speech=has_speech)
+        z_at_t = z_at.unsqueeze(0).float().to(self.device)
+        z_v_t = z_v.unsqueeze(0).float().to(self.device)
+        out = self.model.forward_from_features(z_at_t, z_v_t, z_at_emo=z_at_t, has_speech=has_speech)
 
         advisories = []
         if detected_language and detected_language.lower() not in {"en", "english"}:

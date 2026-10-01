@@ -78,32 +78,29 @@ class Settings:
 
     # Post-hoc temperature scaling (Guo et al., 2017): logit /= T before sigmoid.
     # Calibrated temperature scaling maps raw model margins into decisive, well-spread confidence percentages.
-    temperature: float = float(_env("TEMPERATURE", "0.75"))
+    temperature: float = float(_env("TEMPERATURE", "0.85"))
 
     # ── Post-hoc Emotion Calibration (Leveling & Amplification) ───────────────
-    # Neutral logit dampener (Menon et al., 2020 logit adjustment):
-    # Subtracted from index 0 ("neutral") before softmax to bring neutral down to
-    # the baseline plane of active emotions without retraining. Default: 0.95.
-    neutral_logit_bias: float = float(_env("NEUTRAL_LOGIT_BIAS", "0.95"))
+    # Neutral logit dampener: Set to 0.0 for audio.
+    neutral_logit_bias: float = float(_env("NEUTRAL_LOGIT_BIAS", "0.0"))
 
-    # Audio sad logit dampener:
-    # Low-arousal conversational speech pools heavily into Wav2Vec2 'sad' (index 2).
-    # Dampens sad in the audio path to prevent low-energy audio monopolies. Default: 0.75.
-    audio_sad_logit_bias: float = float(_env("AUDIO_SAD_LOGIT_BIAS", "0.75"))
+    # Visual neutral logit dampener (Menon et al., 2020):
+    # Gently dampens frozen ViT ImageNet neutral prior (~0.40) so active facial emotions (Happy/Sad/Angry)
+    # can register dynamically without overpowering or distorting cross-modal synchrony.
+    visual_neutral_logit_bias: float = float(_env("VISUAL_NEUTRAL_LOGIT_BIAS", "0.40"))
 
-    # Visual sad logit dampener:
-    # Subtracted from index 2 ("sad") in the visual path to level resting-face mouth corners. Default: 0.35.
-    visual_sad_logit_bias: float = float(_env("VISUAL_SAD_LOGIT_BIAS", "0.35"))
+    # Audio sad logit dampener: Set to 0.0 to preserve true acoustic predictions.
+    audio_sad_logit_bias: float = float(_env("AUDIO_SAD_LOGIT_BIAS", "0.0"))
+
+    # Visual sad logit dampener: Set to 0.0.
+    visual_sad_logit_bias: float = float(_env("VISUAL_SAD_LOGIT_BIAS", "0.0"))
 
     # Emotion distribution temperature scaling (T_emo):
-    # Lower T (e.g. 0.65) sharpens and intensifies the dominant emotion (peaking at 60-70%),
-    # matching clear affective reads just like the demo while keeping minority classes legible. Default: 0.65.
-    emotion_temperature: float = float(_env("EMOTION_TEMPERATURE", "0.65"))
+    emotion_temperature: float = float(_env("EMOTION_TEMPERATURE", "0.85"))
 
     # Bounded floor amplification (epsilon):
-    # Injects a gentle baseline floor (~4.0%) so minority emotions (fear, disgust) are never
-    # crushed to 0.x% or 1%, keeping all emotions highlighted while preserving verdict dominance. Default: 0.040.
-    emotion_floor_epsilon: float = float(_env("EMOTION_FLOOR_EPSILON", "0.040"))
+    # Injects a gentle baseline floor (~2.0%) so minority emotions are never crushed to 0.0%.
+    emotion_floor_epsilon: float = float(_env("EMOTION_FLOOR_EPSILON", "0.020"))
 
     # Sarcasm head logit calibration bias:
     # Set to 0.0 by default to preserve the Bayes-optimal threshold (0.50) learned during MUStARD training.
@@ -111,22 +108,19 @@ class Settings:
 
     # Multimodal Biological Harmony Logit Adjustments (Manuscript Section 3.10):
     # Rewards authentic cross-modal emotional synchrony to prevent webcam / domain shift false positives.
-    active_emotion_harmony_bonus: float = float(_env("ACTIVE_EMOTION_HARMONY_BONUS", "2.80"))
-    # When voice and face agree on neutral baseline speech:
-    neutral_emotion_harmony_bonus: float = float(_env("NEUTRAL_EMOTION_HARMONY_BONUS", "0.80"))
+    active_emotion_harmony_bonus: float = float(_env("ACTIVE_EMOTION_HARMONY_BONUS", "2.60"))
+    # When voice and face agree on neutral baseline speech (strictly kept at 0.15 to prevent neutral fakes from escaping):
+    neutral_emotion_harmony_bonus: float = float(_env("NEUTRAL_EMOTION_HARMONY_BONUS", "0.15"))
     # Continuous Information-Theoretic Harmony (D_JS & CosSim) for compatible non-conflicting emotions:
-    # (e.g. pleasant conversational engagement where Happy voice pairs with composed Neutral face)
-    compatible_active_harmony_bonus: float = float(_env("COMPATIBLE_ACTIVE_HARMONY_BONUS", "2.20"))
-    compatible_neutral_harmony_bonus: float = float(_env("COMPATIBLE_NEUTRAL_HARMONY_BONUS", "2.20"))
+    compatible_active_harmony_bonus: float = float(_env("COMPATIBLE_ACTIVE_HARMONY_BONUS", "2.40"))
+    compatible_neutral_harmony_bonus: float = float(_env("COMPATIBLE_NEUTRAL_HARMONY_BONUS", "2.80"))
     # High-arousal negative emotion compensation (e.g. intense anger/shouting):
-    # Prevents organic facial contortions and vocal strain from triggering false positives. Default: 2.70.
-    arousal_harmony_bonus: float = float(_env("AROUSAL_HARMONY_BONUS", "2.70"))
+    arousal_harmony_bonus: float = float(_env("AROUSAL_HARMONY_BONUS", "2.20"))
     # Multimodal Sarcasm & Rhetorical Irony Filter (RQ4 Disambiguation Shield):
-    # In authentic deadpan/playful sarcasm (Castro et al., 2019 MUStARD), the speaker intentionally
-    # shifts prosody. The irony filter scales an authenticity bonus to prevent false alarms. Default: 3.20.
-    irony_harmony_bonus: float = float(_env("IRONY_HARMONY_BONUS", "3.20"))
+    irony_harmony_bonus: float = float(_env("IRONY_HARMONY_BONUS", "2.80"))
+    synthetic_artifact_threshold: float = float(_env("SYNTHETIC_ARTIFACT_THRESHOLD", "2.40"))
     synchrony_cos_min: float = float(_env("SYNCHRONY_COS_MIN", "0.25"))
-    synchrony_js_max: float = float(_env("SYNCHRONY_JS_MAX", "0.35"))
+    synchrony_js_max: float = float(_env("SYNCHRONY_JS_MAX", "0.50"))
     sarcasm_visual_gate_threshold: float = float(_env("SARCASM_VISUAL_GATE_THRESHOLD", "0.25"))
 
 settings = Settings()

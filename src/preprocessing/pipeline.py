@@ -19,7 +19,7 @@ from typing import Optional, Tuple
 
 import torch
 
-from .audio import extract_audio_to_wav, transcribe, get_z_at
+from .audio import extract_audio_to_wav, transcribe, transcribe_with_meta, get_z_at
 from .visual import get_z_v
 
 log = logging.getLogger(__name__)
@@ -126,7 +126,8 @@ class PreprocessingPipeline:
         # Step 2: ASR transcription
         txt_file = self._txt_path(clip_id)
         if not txt_file.exists() or force:
-            transcript = transcribe(wav, self.whisper_model, device=self.device)
+            meta_res = transcribe_with_meta(wav, self.whisper_model, device=self.device)
+            transcript = meta_res.get("text", "")
             txt_file.write_text(transcript, encoding="utf-8")
         else:
             transcript = txt_file.read_text(encoding="utf-8").strip()
