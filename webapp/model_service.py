@@ -437,7 +437,7 @@ class ModelService:
 
             # Synthetic Artifact Damping (Manuscript Section 3.10):
             # Heavy physical manipulation artifacts (raw_val > threshold) cannot be erased by rhetorical claims.
-            synth_thresh = float(getattr(settings, "synthetic_artifact_threshold", 2.40) or 2.40)
+            synth_thresh = float(getattr(settings, "synthetic_artifact_threshold", 2.70) or 2.70)
             synth_damp = max(0.0, 1.0 - max(0.0, (raw_val - synth_thresh) / 0.80))
 
             # 1. High-Arousal Biological Shield (Russell, 1980; Ekman, 1969):
@@ -453,34 +453,43 @@ class ModelService:
                     emo_bonus = settings.neutral_emotion_harmony_bonus
                     # Anger & Arousal Synchrony Shield:
                     if pa[3].item() >= 0.25 and pb[3].item() >= 0.12 and cos_sim >= 0.80 and raw_val < 1.60:
-                        emo_bonus = 1.35
+                        emo_bonus = 1.70
             # 3. Continuous Information-Theoretic Compatible Harmony (D_JS & CosSim):
             elif val_a * val_b > 0 and d_js <= settings.synchrony_js_max:
                 sync_scale = max(0.25, min(1.0, cos_sim)) * max(0.0, 1.0 - (d_js / settings.synchrony_js_max))
                 emo_bonus = settings.compatible_active_harmony_bonus * sync_scale
             elif (val_a > 0 and val_b == 0) or (val_b > 0 and val_a == 0):
-                # Positive conversational engagement: Happy voice paired with composed baseline face
-                sync_scale = max(0.45, min(1.0, cos_sim)) * max(0.40, 1.0 - (d_js / 0.65))
-                emo_bonus = settings.compatible_neutral_harmony_bonus * sync_scale * max(0.20, synth_damp)
+                # Conversational engagement: lively voice (pa[1] >= 0.30) paired with composed baseline face
+                if pa[1].item() >= 0.30:
+                    emo_bonus = settings.compatible_neutral_harmony_bonus * max(0.25, synth_damp)
+                else:
+                    emo_bonus = 0.0
             elif (val_a < 0 and val_b == 0) or (val_b < 0 and val_a == 0):
                 # Screaming/negative affect with motionless neutral face is an affective anomaly (typical of Wav2Lip synthesis)
                 emo_bonus = 0.0
 
             # 4. Multimodal Sarcasm & Rhetorical Irony Filter (RQ4 Disambiguation Shield):
-            if p_sarc >= 0.35:
-                sarc_intensity = min(1.0, max(0.0, p_sarc / 0.50))
-                if top_a_idx == top_b_idx or (val_a > 0 and pb[1] > 0.15):
-                    # Playful / congruent sarcasm with matching smile
+            # Sarcasm bonus requires active facial smiling dynamics (pb[1] > 0.15) or happy intonation (val_a > 0).
+            # Flat neutral voice (val_a == 0) + flat neutral face (top_b_idx == 0) receives 0.0 sarcasm bonus to prevent monologue deepfakes from escaping.
+            if p_sarc >= 0.45:
+                sarc_intensity = min(1.0, max(0.0, (p_sarc - 0.30) / 0.40))
+                if (top_a_idx == top_b_idx and top_a_idx == 1) or (val_a > 0 and pb[1] > 0.15):
+                    # Playful congruent sarcasm (smiling face + upbeat intonation)
                     sarc_bonus = settings.irony_harmony_bonus * sarc_intensity * max(0.25, synth_damp)
-                elif val_a >= 0 and top_b_idx == 0:
-                    # Deadpan poker face delivery: only valid when vocal delivery is non-aggressive (val_a >= 0)
-                    sarc_bonus = settings.irony_harmony_bonus * sarc_intensity * synth_damp
+                elif val_a > 0 and top_b_idx == 0:
+                    # Amused vocal delivery with deadpan poker face
+                    sarc_bonus = (settings.irony_harmony_bonus * 0.60) * sarc_intensity * synth_damp
                 else:
-                    # Discordant delivery
-                    sarc_bonus = (settings.irony_harmony_bonus * 0.40) * sarc_intensity * synth_damp
+                    # Flat monotone or discordant delivery receives NO sarcasm exemption bonus
+                    sarc_bonus = 0.0
 
-            # Evidence-Fused Harmony Prior: Combine biological synchrony and rhetorical context
-            harmony_bonus = max(emo_bonus, sarc_bonus)
+            # 5. Asymmetric Generative Disconnect Penalty (FaceSwap residual smile with monotone voice):
+            disconnect_penalty = 0.0
+            if pb[1].item() >= 0.20 and pa[1].item() < 0.25 and top_a_idx == 0:
+                disconnect_penalty = float(getattr(settings, "generative_disconnect_penalty", 0.85) or 0.85)
+
+            # Evidence-Fused Harmony Prior: Combine biological synchrony, rhetorical context, and disconnect penalty
+            harmony_bonus = max(emo_bonus, sarc_bonus) - disconnect_penalty
 
         # ── Calibrated Evidence Accumulation ─────────────────────────────
         logit = raw_logit.squeeze() - harmony_bonus

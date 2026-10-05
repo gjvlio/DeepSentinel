@@ -69,7 +69,7 @@ class Settings:
     whisper_model: str = "openai/whisper-base"
     vit_model: str = "google/vit-base-patch16-224"
 
-    decision_threshold: float = float(_env("DECISION_THRESHOLD", "0.50"))  # Balanced Bayes boundary (tau = 0.50, logit_0 = 0.0)
+    decision_threshold: float = float(_env("DECISION_THRESHOLD", "0.50"))  # Bayes boundary (tau = 0.50, logit_0 = 0.0)
 
     # Video duration bounds for uploaded clips (in seconds)
     max_upload_duration_sec: float = float(_env("MAX_UPLOAD_DURATION_SEC", "600.0"))  # up to 10 minutes
@@ -109,8 +109,8 @@ class Settings:
     # Multimodal Biological Harmony Logit Adjustments (Manuscript Section 3.10):
     # Rewards authentic cross-modal emotional synchrony to prevent webcam / domain shift false positives.
     active_emotion_harmony_bonus: float = float(_env("ACTIVE_EMOTION_HARMONY_BONUS", "2.60"))
-    # When voice and face agree on neutral baseline speech (strictly kept at 0.15 to prevent neutral fakes from escaping):
-    neutral_emotion_harmony_bonus: float = float(_env("NEUTRAL_EMOTION_HARMONY_BONUS", "0.15"))
+    # When voice and face agree on neutral baseline speech (0.00 prevents flat monologue deepfakes from escaping):
+    neutral_emotion_harmony_bonus: float = float(_env("NEUTRAL_EMOTION_HARMONY_BONUS", "0.00"))
     # Continuous Information-Theoretic Harmony (D_JS & CosSim) for compatible non-conflicting emotions:
     compatible_active_harmony_bonus: float = float(_env("COMPATIBLE_ACTIVE_HARMONY_BONUS", "2.40"))
     compatible_neutral_harmony_bonus: float = float(_env("COMPATIBLE_NEUTRAL_HARMONY_BONUS", "2.80"))
@@ -118,7 +118,8 @@ class Settings:
     arousal_harmony_bonus: float = float(_env("AROUSAL_HARMONY_BONUS", "2.20"))
     # Multimodal Sarcasm & Rhetorical Irony Filter (RQ4 Disambiguation Shield):
     irony_harmony_bonus: float = float(_env("IRONY_HARMONY_BONUS", "2.80"))
-    synthetic_artifact_threshold: float = float(_env("SYNTHETIC_ARTIFACT_THRESHOLD", "2.40"))
+    generative_disconnect_penalty: float = float(_env("GENERATIVE_DISCONNECT_PENALTY", "0.85"))
+    synthetic_artifact_threshold: float = float(_env("SYNTHETIC_ARTIFACT_THRESHOLD", "2.70"))
     synchrony_cos_min: float = float(_env("SYNCHRONY_COS_MIN", "0.25"))
     synchrony_js_max: float = float(_env("SYNCHRONY_JS_MAX", "0.50"))
     sarcasm_visual_gate_threshold: float = float(_env("SARCASM_VISUAL_GATE_THRESHOLD", "0.25"))
