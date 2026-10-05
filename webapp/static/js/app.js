@@ -690,7 +690,19 @@
   });
 
   // ── Video Selection & Loading ────────────────────────────────────────────
-  function pickFile(file) {
+  async function fetchPreviewTranscode(file) {
+    const fd = new FormData();
+    fd.append("file", file);
+    const res = await fetch(`${API_BASE}/transcode/preview`, {
+      method: "POST",
+      headers: getAuthHeaders(),
+      body: fd,
+    });
+    if (!res.ok) throw new Error(`Transcode error (${res.status})`);
+    return await res.blob();
+  }
+
+  async function pickFile(file) {
     if (!file) return;
     if (!ALLOWED.some((ext) => file.name.toLowerCase().endsWith(ext))) {
       return showError(`Unsupported file format. Please use ${ALLOWED.join(", ")}.`);
@@ -703,25 +715,10 @@
     }
     hideError();
 
-    // Check video duration (up to 10 minutes = 600s)
-    const tempVideo = document.createElement("video");
-    tempVideo.preload = "metadata";
-    tempVideo.onloadedmetadata = () => {
-      window.URL.revokeObjectURL(tempVideo.src);
-      const dur = tempVideo.duration;
-      if (dur && dur > 600.5) {
-        resetUpload();
-        return showError(`Video exceeds 10 minutes (${(dur / 60).toFixed(1)} min). Maximum upload length is 10 minutes.`);
-      }
-      if (dur && dur < 2.9) {
-        resetUpload();
-        return showError(`Video is too short (${dur.toFixed(1)}s). Please upload a video at least 3 seconds long.`);
-      }
+    selectedFile = file;
 
-      selectedFile = file;
+    const setupPlayer = (previewBlob, dur, isLegacyTranscoded = false) => {
       totalDuration = dur || 10.0;
-
-      // Initialize crop: [0, min(totalDuration, 10s)]
       cropStart = 0.0;
       cropEnd = Math.min(totalDuration, 10.0);
 
@@ -733,13 +730,16 @@
 
       const chipMeta = document.createElement("span");
       chipMeta.className = "crop-chip-meta";
-      chipMeta.textContent = ` · ${fmtTime(totalDuration)} · ${fmtSize(file.size)}`;
+      chipMeta.textContent = ` · ${fmtTime(totalDuration)} · ${fmtSize(file.size)}${isLegacyTranscoded ? " · Web H.264 Compatibility Mode" : ""}`;
 
       cropFileInfo.append(chipName, chipMeta);
       playerTotalTime.textContent = fmtTime(totalDuration);
       playerCurrTime.textContent = "00:00.0";
 
-      cropVideo.src = URL.createObjectURL(file);
+      if (cropVideo.src && cropVideo.src.startsWith("blob:")) {
+        try { URL.revokeObjectURL(cropVideo.src); } catch (e) {}
+      }
+      cropVideo.src = URL.createObjectURL(previewBlob);
       cropVideo.currentTime = 0;
 
       // Replace dropzone completely with clip selector
@@ -754,26 +754,80 @@
       runBtn.hidden = false;
 
       updateTimelineUI();
-      generateFilmstrip(file);
+      generateFilmstrip(previewBlob);
     };
 
-    tempVideo.onerror = () => {
-      window.URL.revokeObjectURL(tempVideo.src);
-      selectedFile = file;
-      totalDuration = 10.0;
-      cropStart = 0.0;
-      cropEnd = 10.0;
+    // If format is non-native browser container (e.g. .avi, .mkv, .mov, .flv, .wmv)
+    const isKnownNonNativeExt = !file.name.match(/\.(mp4|webm)$/i);
+    if (isKnownNonNativeExt) {
+      try {
+        if (uploadTitle) uploadTitle.textContent = "Optimizing legacy video for browser display...";
+        const transcodedBlob = await fetchPreviewTranscode(file);
+        const tempVid = document.createElement("video");
+        tempVid.preload = "metadata";
+        tempVid.onloadedmetadata = () => {
+          const dur = tempVid.duration || 10.0;
+          setupPlayer(transcodedBlob, dur, true);
+        };
+        tempVid.src = URL.createObjectURL(transcodedBlob);
+        return;
+      } catch (e) {
+        console.warn("Transcode fallback error:", e);
+      }
+    }
 
-      dropzone.hidden = true;
-      dropzone.style.display = "none";
-      cropPanel.hidden = false;
-      cropPanel.style.display = "block";
-      document.body.classList.add("is-crop-mode");
-      uploadStage?.classList.add("stage-crop-active");
-      runBtn.hidden = false;
-      updateTimelineUI();
+    // Attempt browser native loading
+    const tempVideo = document.createElement("video");
+    tempVideo.preload = "auto";
+    const tempBlobUrl = URL.createObjectURL(file);
+    let handled = false;
+
+    const handleFallbackTranscode = async () => {
+      if (handled) return;
+      handled = true;
+      try { URL.revokeObjectURL(tempBlobUrl); } catch (e) {}
+      try {
+        if (uploadTitle) uploadTitle.textContent = "Optimizing legacy video stream for browser display...";
+        const transcodedBlob = await fetchPreviewTranscode(file);
+        const transVid = document.createElement("video");
+        transVid.preload = "metadata";
+        transVid.onloadedmetadata = () => {
+          const dur = transVid.duration || 10.0;
+          setupPlayer(transcodedBlob, dur, true);
+        };
+        transVid.src = URL.createObjectURL(transcodedBlob);
+      } catch (err) {
+        console.error("Transcode failed:", err);
+        setupPlayer(file, 10.0, false);
+      }
     };
-    tempVideo.src = URL.createObjectURL(file);
+
+    tempVideo.onerror = handleFallbackTranscode;
+
+    tempVideo.onloadedmetadata = async () => {
+      const dur = tempVideo.duration;
+      if (dur && dur > 600.5) {
+        try { URL.revokeObjectURL(tempBlobUrl); } catch (e) {}
+        resetUpload();
+        return showError(`Video exceeds 10 minutes (${(dur / 60).toFixed(1)} min). Maximum upload length is 10 minutes.`);
+      }
+      if (dur && dur < 2.9) {
+        try { URL.revokeObjectURL(tempBlobUrl); } catch (e) {}
+        resetUpload();
+        return showError(`Video is too short (${dur.toFixed(1)}s). Please upload a video at least 3 seconds long.`);
+      }
+
+      // Detect legacy MPEG-4 Part 2 or unsupported video stream where browser drops video track (videoWidth === 0)
+      if (tempVideo.videoWidth === 0 || tempVideo.videoHeight === 0) {
+        return handleFallbackTranscode();
+      }
+
+      handled = true;
+      try { URL.revokeObjectURL(tempBlobUrl); } catch (e) {}
+      setupPlayer(file, dur || 10.0, false);
+    };
+
+    tempVideo.src = tempBlobUrl;
   }
 
   // Presets

@@ -17,6 +17,7 @@ No UI yet — this is the model-serving backend. Frontend comes later.
 from __future__ import annotations
 
 import asyncio
+import io
 import json
 import logging
 import re
@@ -26,7 +27,7 @@ import time
 import uuid
 from contextlib import asynccontextmanager
 from pathlib import Path
-from typing import Optional
+from typing import Optional, List, Tuple
 
 from fastapi import FastAPI, File, Form, HTTPException, UploadFile
 from fastapi.middleware.cors import CORSMiddleware
@@ -470,6 +471,58 @@ async def detect_stream(
                     svc.cleanup_clip_artifacts(clip_id)
 
     return StreamingResponse(event_generator(), media_type="text/event-stream")
+
+
+@app.post("/transcode/preview")
+async def transcode_preview(file: UploadFile = File(...)):
+    """
+    Fast Web-Compatibility Transcoder:
+    Converts legacy or unsupported video formats (e.g. MPEG-4 Part 2, AVI, DivX, Xvid, WMV)
+    into standard web-ready H.264 / AAC MP4 for seamless in-browser HTML5 preview and timeline scrub.
+    """
+    suffix = Path(file.filename or "").suffix.lower()
+    if suffix not in ALLOWED_SUFFIXES:
+        raise HTTPException(
+            status_code=422,
+            detail=f"Unsupported format '{suffix}'. Supported formats: {', '.join(sorted(ALLOWED_SUFFIXES))}",
+        )
+
+    clean_name = re.sub(r"[^a-zA-Z0-9_.-]", "_", Path(file.filename or "upload.mp4").name)
+    tmp_in = settings.upload_dir / f"prev_in_{uuid.uuid4().hex[:8]}_{clean_name}"
+    tmp_out = settings.upload_dir / f"prev_out_{uuid.uuid4().hex[:8]}.mp4"
+    settings.upload_dir.mkdir(parents=True, exist_ok=True)
+    try:
+        with tmp_in.open("wb") as f:
+            shutil.copyfileobj(file.file, f)
+
+        # Transcode with ultrafast preset to web-friendly H.264 / AAC with faststart
+        cmd = [
+            "ffmpeg", "-y", "-hide_banner", "-loglevel", "error",
+            "-i", str(tmp_in),
+            "-vf", "scale=-2:min(720\,ih)",
+            "-c:v", "libx264", "-preset", "ultrafast", "-tune", "fastdecode", "-crf", "26",
+            "-c:a", "aac", "-b:a", "128k",
+            "-movflags", "+faststart",
+            str(tmp_out),
+        ]
+        r = subprocess.run(cmd, capture_output=True, text=True, timeout=60)
+        if r.returncode != 0 or not tmp_out.exists() or tmp_out.stat().st_size < 100:
+            log.warning(f"Preview transcode failed: {r.stderr}")
+            raise HTTPException(status_code=500, detail=f"Preview transcode failed: {r.stderr}")
+
+        content = tmp_out.read_bytes()
+        return StreamingResponse(
+            io.BytesIO(content),
+            media_type="video/mp4",
+            headers={
+                "Content-Disposition": f'inline; filename="preview_{Path(clean_name).stem}.mp4"',
+                "Content-Length": str(len(content)),
+                "Cache-Control": "no-store",
+            },
+        )
+    finally:
+        tmp_in.unlink(missing_ok=True)
+        tmp_out.unlink(missing_ok=True)
 
 
 # ── Frontend (SPA) ─────────────────────────────────────────────────────────────

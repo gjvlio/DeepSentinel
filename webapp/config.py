@@ -85,9 +85,9 @@ class Settings:
     neutral_logit_bias: float = float(_env("NEUTRAL_LOGIT_BIAS", "0.0"))
 
     # Visual neutral logit dampener (Menon et al., 2020):
-    # Gently dampens frozen ViT ImageNet neutral prior (~0.40) so active facial emotions (Happy/Sad/Angry)
-    # can register dynamically without overpowering or distorting cross-modal synchrony.
-    visual_neutral_logit_bias: float = float(_env("VISUAL_NEUTRAL_LOGIT_BIAS", "0.40"))
+    # Calibrated to dampen the frozen ViT ImageNet resting-state neutral prior (~0.85) so active facial expressions
+    # (Happy/Sad/Angry) register dynamically and faithfully reflect visual emotion.
+    visual_neutral_logit_bias: float = float(_env("VISUAL_NEUTRAL_LOGIT_BIAS", "0.85"))
 
     # Audio sad logit dampener: Set to 0.0 to preserve true acoustic predictions.
     audio_sad_logit_bias: float = float(_env("AUDIO_SAD_LOGIT_BIAS", "0.0"))
