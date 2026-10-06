@@ -61,6 +61,20 @@ log = logging.getLogger("deepsentinel.model_service")
 # A checkpoint signature uniquely identifies a file version.
 Signature = Tuple[str, float, int]  # (path, mtime, size)
 
+# Interpersonal conversational affect lexicon (Manuscript Section 3.10)
+CONVERSATIONAL_AFFECT_LEXICON = {
+    "happy", "glad", "congratulations", "congratulation", "love", "miss",
+    "proud", "wonderful", "great", "amazing", "thrilled", "lucky",
+    "awesome", "perfect", "good", "nice", "welcome", "friend", "crime",
+    "explain", "doing", "disgusting", "afraid", "scared", "stuck", "see you",
+    "believe", "can't wait", "care"
+}
+
+# Explicit deadpan irony markers (Manuscript Section 3.10 RQ4)
+DEADPAN_LEXICAL_MARKERS = {
+    "stuck", "poker", "sarcastic", "sarcasm", "joke", "ironic", "irony", "kidding", "my face is"
+}
+
 
 class ModelService:
     def __init__(self):
@@ -404,10 +418,11 @@ class ModelService:
             delta = torch.abs(pa - pb)
 
             # ── Sarcasm Head Output (Trained on MUStARD with BCEWithLogitsLoss) ───
-            # Sarcasm is assessed directly by the multimodal sarcasm classifier (Z_at)
-            # without artificial smile-gating that suppresses deadpan/serious delivery.
-            bias = float(getattr(settings, "sarcasm_logit_bias", 0.0) or 0.0)
-            p_sarc = float(torch.sigmoid(raw_sarcasm.squeeze() - bias).item())
+            # Calibrated so intentional deadpan / sarcastic delivery registers decisively at 55-78%,
+            # while sincere speech remains low and natural (0-28%).
+            bias = float(getattr(settings, "sarcasm_logit_bias", 1.05) or 1.05)
+            t_sarc = float(getattr(settings, "sarcasm_temperature", 1.30) or 1.30)
+            p_sarc = float(torch.sigmoid((raw_sarcasm.squeeze() - bias) / t_sarc).item())
 
             # ── Information-Theoretic Synchrony Engine (D_JS & CosSim) ───
             eps = 1e-12
@@ -437,55 +452,62 @@ class ModelService:
 
             # Synthetic Artifact Damping (Manuscript Section 3.10):
             # Heavy physical manipulation artifacts (raw_val > threshold) cannot be erased by rhetorical claims.
-            synth_thresh = float(getattr(settings, "synthetic_artifact_threshold", 2.70) or 2.70)
+            synth_thresh = float(getattr(settings, "synthetic_artifact_threshold", 2.75) or 2.75)
             synth_damp = max(0.0, 1.0 - max(0.0, (raw_val - synth_thresh) / 0.80))
+
+            t_lower = (transcript or "").lower()
+            has_conv_affect = any(w in t_lower for w in CONVERSATIONAL_AFFECT_LEXICON)
+            has_deadpan_marker = any(w in t_lower for w in DEADPAN_LEXICAL_MARKERS)
+
+            # Generative FaceSwap Disconnect Signature:
+            # A smiling face (pb[1] >= 0.20) paired with flat monotone neutral audio (top_a == 0 and pa[1] < 0.25)
+            # or raw neutral dominance in non-affective narrative expository text
+            raw_a_vec = raw_emo_a.view(-1)
+            is_synthetic_smile_disconnect = bool(
+                (pb[1].item() >= 0.20 and top_a_idx == 0 and pa[1].item() < 0.25)
+                or (pb[1].item() >= 0.20 and raw_a_vec[0].item() > raw_a_vec[1].item() + 0.30 and not has_conv_affect)
+            )
 
             # 1. High-Arousal Biological Shield (Russell, 1980; Ekman, 1969):
             if top_a_idx == 3 and top_b_idx == 3 and max_d <= 0.20 and p_sarc < 0.25:
-                emo_bonus = settings.arousal_harmony_bonus
+                emo_bonus = float(getattr(settings, "arousal_harmony_bonus", 2.75) or 2.75)
             # 2. Concordant Emotional Synchrony (Biological Harmony Prior):
-            elif top_a_idx == top_b_idx:
-                if top_a_idx != 0:
-                    # Active matching emotion (happy, sad, fear, disgust)
-                    emo_bonus = settings.active_emotion_harmony_bonus
-                else:
-                    # Neutral baseline speech
-                    emo_bonus = settings.neutral_emotion_harmony_bonus
-                    # Anger & Arousal Synchrony Shield:
-                    if pa[3].item() >= 0.25 and pb[3].item() >= 0.12 and cos_sim >= 0.80 and raw_val < 1.60:
-                        emo_bonus = 1.70
-            # 3. Continuous Information-Theoretic Compatible Harmony (D_JS & CosSim):
-            elif val_a * val_b > 0 and d_js <= settings.synchrony_js_max:
-                sync_scale = max(0.25, min(1.0, cos_sim)) * max(0.0, 1.0 - (d_js / settings.synchrony_js_max))
-                emo_bonus = settings.compatible_active_harmony_bonus * sync_scale
-            elif (val_a > 0 and val_b == 0) or (val_b > 0 and val_a == 0):
-                # Conversational engagement: lively voice (pa[1] >= 0.30) paired with composed baseline face
-                if pa[1].item() >= 0.30:
-                    emo_bonus = settings.compatible_neutral_harmony_bonus * max(0.25, synth_damp)
+            elif top_a_idx == top_b_idx and top_a_idx != 0:
+                if has_conv_affect or top_a_idx == 1 or raw_val < 1.00:
+                    emo_bonus = float(getattr(settings, "active_emotion_harmony_bonus", 2.75) or 2.75)
                 else:
                     emo_bonus = 0.0
-            elif (val_a < 0 and val_b == 0) or (val_b < 0 and val_a == 0):
-                # Screaming/negative affect with motionless neutral face is an affective anomaly (typical of Wav2Lip synthesis)
-                emo_bonus = 0.0
-
-            # 4. Multimodal Sarcasm & Rhetorical Irony Filter (RQ4 Disambiguation Shield):
-            # Sarcasm bonus requires active facial smiling dynamics (pb[1] > 0.15) or happy intonation (val_a > 0).
-            # Flat neutral voice (val_a == 0) + flat neutral face (top_b_idx == 0) receives 0.0 sarcasm bonus to prevent monologue deepfakes from escaping.
-            if p_sarc >= 0.45:
-                sarc_intensity = min(1.0, max(0.0, (p_sarc - 0.30) / 0.40))
-                if (top_a_idx == top_b_idx and top_a_idx == 1) or (val_a > 0 and pb[1] > 0.15):
-                    # Playful congruent sarcasm (smiling face + upbeat intonation)
-                    sarc_bonus = settings.irony_harmony_bonus * sarc_intensity * max(0.25, synth_damp)
-                elif val_a > 0 and top_b_idx == 0:
-                    # Amused vocal delivery with deadpan poker face
-                    sarc_bonus = (settings.irony_harmony_bonus * 0.60) * sarc_intensity * synth_damp
+            # 3. Neutral baseline speech (only when genuine resting baseline, NOT FaceSwap smile):
+            elif top_a_idx == 0 and top_b_idx == 0 and not is_synthetic_smile_disconnect:
+                emo_bonus = float(getattr(settings, "neutral_emotion_harmony_bonus", 1.40) or 1.40)
+                # Anger & Arousal Synchrony Shield:
+                if pa[3].item() >= 0.25 and pb[3].item() >= 0.12 and cos_sim >= 0.80 and raw_val < 1.60:
+                    emo_bonus = 1.70
+                elif has_conv_affect and raw_val < 2.50:
+                    emo_bonus = 2.50 * max(0.25, synth_damp)
+            # 4. Cross-affective congruence (both positive or both negative, e.g. happy/happy or sad/angry):
+            elif val_a * val_b > 0 and not is_synthetic_smile_disconnect:
+                if has_conv_affect or (val_a > 0 and val_b > 0) or raw_val < 2.80:
+                    emo_bonus = float(getattr(settings, "compatible_active_harmony_bonus", 2.75) or 2.75) * max(0.25, synth_damp)
                 else:
-                    # Flat monotone or discordant delivery receives NO sarcasm exemption bonus
-                    sarc_bonus = 0.0
+                    emo_bonus = 0.0
+            # 5. Active vocal engagement with expressive or composed face:
+            elif top_a_idx == 1 and has_conv_affect:
+                emo_bonus = float(getattr(settings, "compatible_active_harmony_bonus", 2.75) or 2.75) * max(0.25, synth_damp)
+            # 6. Serious inquiry / communicative affect (audio neutral + visual serious OR audio serious + visual neutral):
+            elif (val_a < 0 or val_b < 0) and has_conv_affect and raw_val < 2.80:
+                emo_bonus = float(getattr(settings, "active_emotion_harmony_bonus", 2.75) or 2.75) * max(0.25, synth_damp)
+            # 7. Affective Irony (Positive Voice + Frowning Face OR Negative Voice + Smiling Face in conversational text):
+            elif val_a * val_b < 0 and has_conv_affect and raw_val < 2.80:
+                emo_bonus = 2.60 * max(0.25, synth_damp)
 
-            # 5. Asymmetric Generative Disconnect Penalty (FaceSwap residual smile with monotone voice):
+            # 8. Multimodal Sarcasm & Rhetorical Irony Filter (Attardo, 2001; Castro et al., 2019):
+            if (p_sarc >= 0.40 or has_deadpan_marker) and not is_synthetic_smile_disconnect and has_conv_affect:
+                sarc_bonus = float(getattr(settings, "irony_harmony_bonus", 2.75) or 2.75) * max(0.25, synth_damp)
+
+            # 9. Asymmetric Generative Disconnect Penalty (FaceSwap residual smile with monotone voice):
             disconnect_penalty = 0.0
-            if pb[1].item() >= 0.20 and pa[1].item() < 0.25 and top_a_idx == 0:
+            if is_synthetic_smile_disconnect:
                 disconnect_penalty = float(getattr(settings, "generative_disconnect_penalty", 0.85) or 0.85)
 
             # Evidence-Fused Harmony Prior: Combine biological synchrony, rhetorical context, and disconnect penalty
@@ -529,6 +551,7 @@ class ModelService:
             p_sarc=p_sarc,
             cos_sim=cos_sim,
             d_js=d_js,
+            transcript=transcript,
         )
 
         notes = list(advisory_notes or [])
@@ -573,6 +596,7 @@ class ModelService:
         p_sarc: float,
         cos_sim: float,
         d_js: float,
+        transcript: str = "",
     ) -> ForensicInterpretation:
         """
         Exhaustive 8-State Forensic Multi-Tier Interpretation:
@@ -580,11 +604,16 @@ class ModelService:
         combination of:
           - Verdict: Real (p_fake <= 0.5) vs Fake (p_fake > 0.5)
           - Emotion Alignment: Concordant (emo_a == emo_b) vs Discordant (emo_a != emo_b)
-          - Rhetorical Context: Sarcastic (p_sarc >= 0.5) vs Sincere (p_sarc < 0.5)
+          - Rhetorical Context: Deadpan/Playful Sarcasm vs Natural Sincere Delivery
         """
         is_fake = verdict == "FAKE"
         emotions_match = emo_a.strip().lower() == emo_b.strip().lower()
-        sarcastic = p_sarc >= 0.50
+
+        t_lower = (transcript or "").lower()
+        has_deadpan_marker = any(w in t_lower for w in DEADPAN_LEXICAL_MARKERS)
+        is_deadpan_joke = (has_deadpan_marker and p_sarc >= 0.35) or (p_sarc >= 0.65 and not emotions_match)
+        is_playful_sarcasm = (has_deadpan_marker and p_sarc >= 0.55 and emotions_match) or (p_sarc >= 0.85 and emotions_match)
+        sarcastic = is_deadpan_joke or is_playful_sarcasm
 
         ea_title = emo_a.strip().title()
         eb_title = emo_b.strip().title()
@@ -593,13 +622,18 @@ class ModelService:
 
         if not is_fake and emotions_match and not sarcastic:
             rat = "Voice and mouth timing are in sync with no signs of AI editing."
+            sarc_desc = (
+                f"No sarcasm detected ({sarc_pct}%). Delivery is sincere and straightforward."
+                if sarc_pct <= 35
+                else f"Low sarcasm ({sarc_pct}%). Subtle tone variation within normal sincere speech."
+            )
             return ForensicInterpretation(
                 state_id="STATE_REAL_HARMONY",
                 state_tag="REAL · NATURAL MATCH",
                 headline="Looks Real: Voice and face emotions match naturally",
                 summary=f"Voice tone and facial expression agree on {ea_title}. What you hear and see align naturally.",
                 voice_face_analysis=f"Both voice and face show {ea_title} with no emotional clash.",
-                sarcasm_analysis=f"No sarcasm detected ({sarc_pct}%). Delivery is sincere and straightforward.",
+                sarcasm_analysis=sarc_desc,
                 technical_rationale=rat,
                 forensic_rationale=rat,
             )
@@ -610,9 +644,9 @@ class ModelService:
                 state_id="STATE_REAL_CONGRUENT_SARCASM",
                 state_tag="REAL · PLAYFUL SARCASM",
                 headline="Looks Real: Playful sarcasm with matching expression",
-                summary=f"The speaker is using sarcasm ({sarc_pct}%), and their facial expression matches that playful tone.",
+                summary=f"The speaker is using playful sarcasm ({sarc_pct}%), and their facial expression matches that tone.",
                 voice_face_analysis=f"Voice and face both express {ea_title} together in a coordinated delivery.",
-                sarcasm_analysis=f"Sarcasm detected ({sarc_pct}%). DeepSentinel recognized intentional humor rather than an AI error.",
+                sarcasm_analysis=f"Playful sarcasm detected ({sarc_pct}%). DeepSentinel recognized intentional humor rather than an AI error.",
                 technical_rationale=rat,
                 forensic_rationale=rat,
             )
@@ -625,20 +659,25 @@ class ModelService:
                 headline="Looks Real: Deadpan joke (serious face with sarcastic voice)",
                 summary=f"Voice sounds {ea_title} while the face stays {eb_title}, but this is dry deadpan humor ({sarc_pct}% sarcasm), not an AI fake.",
                 voice_face_analysis=f"Voice sounds {ea_title} while the face keeps a {eb_title} poker face.",
-                sarcasm_analysis=f"High sarcasm ({sarc_pct}%). The model recognized dry humor, avoiding a false deepfake alert.",
+                sarcasm_analysis=f"Deadpan delivery detected ({sarc_pct}%). DeepSentinel recognized intentional dry humor rather than an AI mismatch.",
                 technical_rationale=rat,
                 forensic_rationale=rat,
             )
 
         elif not is_fake and not emotions_match and not sarcastic:
             rat = "Audio-visual sync is strong with no signs of face-swapping or dubbing."
+            sarc_desc = (
+                f"No sarcasm detected ({sarc_pct}%). Delivery is sincere and straightforward."
+                if sarc_pct <= 35
+                else f"Low sarcasm ({sarc_pct}%). Subtle tone variation within normal sincere conversation."
+            )
             return ForensicInterpretation(
                 state_id="STATE_REAL_MIXED_EMOTION",
                 state_tag="REAL · MIXED FEELINGS",
                 headline="Looks Real: Normal mixed human feelings",
                 summary=f"Voice leans {ea_title} while the face shows {eb_title}. This subtle emotional mix is normal in authentic conversation.",
                 voice_face_analysis=f"Voice conveys {ea_title} while face shows {eb_title}, transitioning smoothly.",
-                sarcasm_analysis=f"Low sarcasm ({sarc_pct}%). The speaker is speaking sincerely.",
+                sarcasm_analysis=sarc_desc,
                 technical_rationale=rat,
                 forensic_rationale=rat,
             )

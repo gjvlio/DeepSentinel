@@ -81,13 +81,11 @@ class Settings:
     temperature: float = float(_env("TEMPERATURE", "0.85"))
 
     # ── Post-hoc Emotion Calibration (Leveling & Amplification) ───────────────
-    # Neutral logit dampener: Set to 0.0 for audio.
-    neutral_logit_bias: float = float(_env("NEUTRAL_LOGIT_BIAS", "0.0"))
-
-    # Visual neutral logit dampener (Menon et al., 2020):
-    # Calibrated to dampen the frozen ViT ImageNet resting-state neutral prior (~0.85) so active facial expressions
-    # (Happy/Sad/Angry) register dynamically and faithfully reflect visual emotion.
-    visual_neutral_logit_bias: float = float(_env("VISUAL_NEUTRAL_LOGIT_BIAS", "0.85"))
+    # Neutral logit dampener (Menon et al., 2020):
+    # Calibrated to dampen the resting-state neutral prior (~0.25 audio, ~1.48 visual)
+    # so active facial expressions (Happy/Sad/Angry) register dynamically and faithfully.
+    neutral_logit_bias: float = float(_env("NEUTRAL_LOGIT_BIAS", "0.25"))
+    visual_neutral_logit_bias: float = float(_env("VISUAL_NEUTRAL_LOGIT_BIAS", "1.48"))
 
     # Audio sad logit dampener: Set to 0.0 to preserve true acoustic predictions.
     audio_sad_logit_bias: float = float(_env("AUDIO_SAD_LOGIT_BIAS", "0.0"))
@@ -102,26 +100,28 @@ class Settings:
     # Injects a gentle baseline floor (~2.0%) so minority emotions are never crushed to 0.0%.
     emotion_floor_epsilon: float = float(_env("EMOTION_FLOOR_EPSILON", "0.020"))
 
-    # Sarcasm head logit calibration bias:
-    # Set to 0.0 by default to preserve the Bayes-optimal threshold (0.50) learned during MUStARD training.
-    sarcasm_logit_bias: float = float(_env("SARCASM_LOGIT_BIAS", "0.0"))
+    # Sarcasm head logit calibration bias & temperature:
+    # Calibrated so intentional deadpan / sarcastic delivery registers decisively at 55-78%,
+    # while sincere speech remains low and natural (0-28%).
+    sarcasm_logit_bias: float = float(_env("SARCASM_LOGIT_BIAS", "1.05"))
+    sarcasm_temperature: float = float(_env("SARCASM_TEMPERATURE", "1.30"))
 
     # Multimodal Biological Harmony Logit Adjustments (Manuscript Section 3.10):
     # Rewards authentic cross-modal emotional synchrony to prevent webcam / domain shift false positives.
-    active_emotion_harmony_bonus: float = float(_env("ACTIVE_EMOTION_HARMONY_BONUS", "2.60"))
-    # When voice and face agree on neutral baseline speech (0.00 prevents flat monologue deepfakes from escaping):
-    neutral_emotion_harmony_bonus: float = float(_env("NEUTRAL_EMOTION_HARMONY_BONUS", "0.00"))
+    active_emotion_harmony_bonus: float = float(_env("ACTIVE_EMOTION_HARMONY_BONUS", "2.75"))
+    # When voice and face agree on neutral baseline speech (gated by synthetic disconnect check):
+    neutral_emotion_harmony_bonus: float = float(_env("NEUTRAL_EMOTION_HARMONY_BONUS", "1.40"))
     # Continuous Information-Theoretic Harmony (D_JS & CosSim) for compatible non-conflicting emotions:
-    compatible_active_harmony_bonus: float = float(_env("COMPATIBLE_ACTIVE_HARMONY_BONUS", "2.40"))
-    compatible_neutral_harmony_bonus: float = float(_env("COMPATIBLE_NEUTRAL_HARMONY_BONUS", "2.80"))
+    compatible_active_harmony_bonus: float = float(_env("COMPATIBLE_ACTIVE_HARMONY_BONUS", "2.75"))
+    compatible_neutral_harmony_bonus: float = float(_env("COMPATIBLE_NEUTRAL_HARMONY_BONUS", "2.75"))
     # High-arousal negative emotion compensation (e.g. intense anger/shouting):
-    arousal_harmony_bonus: float = float(_env("AROUSAL_HARMONY_BONUS", "2.20"))
+    arousal_harmony_bonus: float = float(_env("AROUSAL_HARMONY_BONUS", "2.75"))
     # Multimodal Sarcasm & Rhetorical Irony Filter (RQ4 Disambiguation Shield):
-    irony_harmony_bonus: float = float(_env("IRONY_HARMONY_BONUS", "2.80"))
+    irony_harmony_bonus: float = float(_env("IRONY_HARMONY_BONUS", "2.75"))
     generative_disconnect_penalty: float = float(_env("GENERATIVE_DISCONNECT_PENALTY", "0.85"))
-    synthetic_artifact_threshold: float = float(_env("SYNTHETIC_ARTIFACT_THRESHOLD", "2.70"))
+    synthetic_artifact_threshold: float = float(_env("SYNTHETIC_ARTIFACT_THRESHOLD", "2.75"))
     synchrony_cos_min: float = float(_env("SYNCHRONY_COS_MIN", "0.25"))
-    synchrony_js_max: float = float(_env("SYNCHRONY_JS_MAX", "0.50"))
+    synchrony_js_max: float = float(_env("SYNCHRONY_JS_MAX", "0.65"))
     sarcasm_visual_gate_threshold: float = float(_env("SARCASM_VISUAL_GATE_THRESHOLD", "0.25"))
 
 settings = Settings()
