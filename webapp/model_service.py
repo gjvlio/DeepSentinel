@@ -838,12 +838,31 @@ class ModelService:
 
             anchor_embedding = None
             last_box = None
+            auto_rotate_code = None
+
+            # Orientation check: read first frame and test if rotation is needed for face detection
+            if app is not None and indices:
+                cap.set(cv2.CAP_PROP_POS_FRAMES, indices[0])
+                ret_t, frame_t = cap.read()
+                if ret_t and frame_t is not None:
+                    init_det = app.get(frame_t)
+                    if not init_det or not any(getattr(f, "det_score", 0.0) >= 0.35 for f in init_det):
+                        for rot_code in [cv2.ROTATE_90_CLOCKWISE, cv2.ROTATE_90_COUNTERCLOCKWISE, cv2.ROTATE_180]:
+                            r_f = cv2.rotate(frame_t, rot_code)
+                            r_det = app.get(r_f)
+                            if r_det and any(getattr(f, "det_score", 0.0) >= 0.35 for f in r_det):
+                                auto_rotate_code = rot_code
+                                log.info(f"Telemetry auto-oriented frames: applying rotation code {rot_code}")
+                                break
 
             for idx in indices:
                 cap.set(cv2.CAP_PROP_POS_FRAMES, idx)
                 ret, frame = cap.read()
                 if not ret or frame is None:
                     continue
+                if auto_rotate_code is not None:
+                    frame = cv2.rotate(frame, auto_rotate_code)
+                h, w = frame.shape[:2]
                 frames_sampled.append(frame)
                 time_sec = round(float(idx) / fps, 3)
 

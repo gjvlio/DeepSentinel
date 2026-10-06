@@ -207,7 +207,25 @@ def model_reload():
     reloaded = svc.maybe_reload(force=True)
     meta = svc.info()
     meta.note = (meta.note or "") + (" [reloaded]" if reloaded else " [no change]")
-    return meta
+def _check_video_needs_normalization(video_path: Path) -> bool:
+    """Check if video has orientation metadata (portrait phones), non-MP4 container, or needs CFR remux."""
+    if video_path.suffix.lower() != ".mp4":
+        return True
+    try:
+        cmd = [
+            "ffprobe", "-v", "error",
+            "-select_streams", "v:0",
+            "-show_entries", "stream_tags=rotate:stream_side_data=rotation",
+            "-of", "default=noprint_wrappers=1",
+            str(video_path)
+        ]
+        res = subprocess.run(cmd, capture_output=True, text=True, timeout=5)
+        out = res.stdout.lower()
+        if "rotate" in out or "rotation" in out or "displaymatrix" in out:
+            return True
+    except Exception:
+        pass
+    return False
 
 
 def _prepare_clip(
@@ -343,10 +361,9 @@ def _prepare_clip(
                 else:
                     log.warning(f"ffmpeg trim notice: {r.stderr}; using source file")
             except Exception as e:
-                log.warning(f"ffmpeg slicing exception ({e}); using source file")
 
-        # If untrimmed non-mp4 (e.g. webm, mov, mkv), remux to CFR H.264 mp4 for reliable cv2 seeking
-        if clip_to_eval == dest and dest.suffix.lower() != ".mp4":
+        # If untrimmed video has rotation metadata or non-mp4 format, remux/transcode to upright CFR H.264 mp4
+        if clip_to_eval == dest and _check_video_needs_normalization(dest):
             norm_name = f"norm_{dest.stem}_{unique_name}.mp4"
             norm_dest = settings.upload_dir / norm_name
             tracked_files.append(norm_dest)

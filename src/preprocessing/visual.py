@@ -271,6 +271,32 @@ def _load_insightface_app():
     return _insightface_app
 
 
+def _safe_square_crop(frame: np.ndarray, cx: float, cy: float, side: float) -> np.ndarray:
+    """
+    Extract a strict 1:1 square crop with reflection padding when the bounding box
+    extends past the image borders (common in smartphone selfie/portrait videos).
+    """
+    h, w = frame.shape[:2]
+    target_side = max(16, int(round(side)))
+    half = target_side // 2
+    x1 = int(round(cx)) - half
+    y1 = int(round(cy)) - half
+    x2 = x1 + target_side
+    y2 = y1 + target_side
+
+    p_top = max(0, -y1)
+    p_bot = max(0, y2 - h)
+    p_lft = max(0, -x1)
+    p_rgt = max(0, x2 - w)
+
+    if p_top > 0 or p_bot > 0 or p_lft > 0 or p_rgt > 0:
+        padded = cv2.copyMakeBorder(frame, p_top, p_bot, p_lft, p_rgt, cv2.BORDER_REFLECT_101)
+        crop = padded[y1 + p_top : y2 + p_top, x1 + p_lft : x2 + p_lft]
+    else:
+        crop = frame[y1:y2, x1:x2]
+    return crop
+
+
 def _insightface_detect(
     frames: List[np.ndarray],
     confidence_threshold: float = 0.7,
@@ -303,12 +329,7 @@ def _insightface_detect(
             cx, cy = (x1 + x2) / 2.0, (y1 + y2) / 2.0
             # Expand to square bounding box with 20% context margin to preserve 1:1 facial aspect ratio
             side = max(bw, bh) * 1.20
-            h, w = frame.shape[:2]
-            ny1 = max(0, int(round(cy - side / 2.0)))
-            ny2 = min(h, int(round(cy + side / 2.0)))
-            nx1 = max(0, int(round(cx - side / 2.0)))
-            nx2 = min(w, int(round(cx + side / 2.0)))
-            crop = frame[ny1:ny2, nx1:nx2]
+            crop = _safe_square_crop(frame, cx, cy, side)
             if crop.size == 0:
                 continue
             base = float(best.det_score) * sharpness_score(crop)
@@ -338,12 +359,7 @@ def _haar_fallback(frames: List[np.ndarray]) -> List[Tuple[np.ndarray, float]]:
                     x, y, w_box, h_box = max(faces, key=lambda f: f[2] * f[3])
                     cx, cy = x + w_box / 2.0, y + h_box / 2.0
                     side = max(w_box, h_box) * 1.20
-                    h_f, w_f = frame.shape[:2]
-                    ny1 = max(0, int(round(cy - side / 2.0)))
-                    ny2 = min(h_f, int(round(cy + side / 2.0)))
-                    nx1 = max(0, int(round(cx - side / 2.0)))
-                    nx2 = min(w_f, int(round(cx + side / 2.0)))
-                    crop = frame[ny1:ny2, nx1:nx2]
+                    crop = _safe_square_crop(frame, cx, cy, side)
                     if crop.size > 0:
                         base = sharpness_score(crop)
                         results.append((crop, base))
@@ -368,15 +384,48 @@ def detect_and_align_faces(
 ) -> List[Tuple[np.ndarray, float]]:
     """
     Coarse-filter then run face detector.
+    Automatically handles smartphone portrait video rotation (90° / 270° / 180°).
     Returns list of (face_crop_bgr, AU-saliency-weighted quality_score).
     """
+    if not frames:
+        return []
+
     candidates = [f for f in frames if coarse_has_face(f)]
     if not candidates:
         candidates = frames
 
     if detector == "retinaface":
-        return _insightface_detect(candidates, confidence_threshold)
-    return _haar_fallback(candidates)
+        results = _insightface_detect(candidates, confidence_threshold)
+    else:
+        results = _haar_fallback(candidates)
+
+    if results and len(results) > 0:
+        return results
+
+    # Smartphone Portrait Rotation Fallback:
+    # If 0 faces found (camera sensor recorded sideways), test 90°, 270°, and 180° rotations.
+    test_frame = frames[0]
+    rotations = [
+        (cv2.ROTATE_90_CLOCKWISE, 90),
+        (cv2.ROTATE_90_COUNTERCLOCKWISE, 270),
+        (cv2.ROTATE_180, 180),
+    ]
+    for rot_code, angle in rotations:
+        r_frame = cv2.rotate(test_frame, rot_code)
+        if coarse_has_face(r_frame):
+            if detector == "retinaface":
+                t_res = _insightface_detect([r_frame], confidence_threshold)
+            else:
+                t_res = _haar_fallback([r_frame])
+            if t_res and len(t_res) > 0:
+                log.info(f"Auto-oriented video frames: corrected {angle}° rotation for portrait face detection.")
+                rot_frames = [cv2.rotate(f, rot_code) for f in frames]
+                r_cands = [f for f in rot_frames if coarse_has_face(f)] or rot_frames
+                if detector == "retinaface":
+                    return _insightface_detect(r_cands, confidence_threshold)
+                return _haar_fallback(r_cands)
+
+    return results
 
 
 # ── ViT embedding ──────────────────────────────────────────────────────────────
