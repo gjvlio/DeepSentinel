@@ -390,7 +390,6 @@
   let previewTimer = null;
   let offscreenPreviewVideo = null;
   let filmstripAbort = false;
-  let selectedFile = null;
   let activePreviewBlob = null;
 
   function updateTimelineUI() {
