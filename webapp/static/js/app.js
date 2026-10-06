@@ -383,6 +383,8 @@
   let previewTimer = null;
   let offscreenPreviewVideo = null;
   let filmstripAbort = false;
+  let selectedFile = null;
+  let activePreviewBlob = null;
 
   function updateTimelineUI() {
     if (!totalDuration || totalDuration <= 0) return;
@@ -718,6 +720,7 @@
     selectedFile = file;
 
     const setupPlayer = (previewBlob, dur, isLegacyTranscoded = false) => {
+      activePreviewBlob = previewBlob;
       totalDuration = dur || 10.0;
       cropStart = 0.0;
       cropEnd = Math.min(totalDuration, 10.0);
@@ -908,6 +911,7 @@
 
   function resetUpload() {
     selectedFile = null;
+    activePreviewBlob = null;
     filmstripAbort = true;
     fileInput.value = "";
     clearInterval(previewTimer);
@@ -1078,11 +1082,42 @@
 
     if (!video || !canvas || !file) return;
 
-    // Load selected clip for looped playback
-    video.src = URL.createObjectURL(file);
-    video.currentTime = startSec;
-    video.muted = true;
-    video.play().catch(() => {});
+    const playableBlob = activePreviewBlob || file;
+
+    const attachVideoSource = (blob) => {
+      if (video.src && video.src.startsWith("blob:")) {
+        try { URL.revokeObjectURL(video.src); } catch (e) {}
+      }
+      video.src = URL.createObjectURL(blob);
+      video.currentTime = startSec;
+      video.muted = true;
+      video.play().catch(() => {});
+    };
+
+    // Auto-transcode fallback if browser drops video track or fails to decode
+    video.onerror = async () => {
+      console.warn("Live HUD video decoding error; requesting web compatibility transcode...");
+      try {
+        const transcoded = await fetchPreviewTranscode(selectedFile || file);
+        activePreviewBlob = transcoded;
+        attachVideoSource(transcoded);
+      } catch (err) {
+        console.error("Live HUD transcode fallback failed:", err);
+      }
+    };
+
+    video.onloadeddata = async () => {
+      if (video.videoWidth === 0 && (!activePreviewBlob || activePreviewBlob === file)) {
+        console.warn("Live HUD video track missing (videoWidth === 0); requesting web compatibility transcode...");
+        try {
+          const transcoded = await fetchPreviewTranscode(selectedFile || file);
+          activePreviewBlob = transcoded;
+          attachVideoSource(transcoded);
+        } catch (err) {}
+      }
+    };
+
+    attachVideoSource(playableBlob);
 
     hudLoopHandler = () => {
       if (video.currentTime >= endSec || video.currentTime < startSec - 0.2) {
@@ -1602,7 +1637,7 @@
     clientTrackedBox = null;
 
     // Start video playback & real-time face HUD on the left
-    startAnalyzingHUD(selectedFile, cropStart, cropEnd);
+    startAnalyzingHUD(activePreviewBlob || selectedFile, cropStart, cropEnd);
 
     const steps = [...document.querySelectorAll("#steps li")];
     steps.forEach((s) => s.classList.remove("done", "active"));
