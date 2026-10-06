@@ -1142,8 +1142,6 @@
     }
 
     const playableBlob = activePreviewBlob || file;
-    let isSeekingHUD = false;
-
     const attachVideoSource = (blob) => {
       if (video.src && video.src.startsWith("blob:")) {
         try { URL.revokeObjectURL(video.src); } catch (e) {}
@@ -1151,48 +1149,35 @@
       video.muted = true;
       video.defaultMuted = true;
       video.playsInline = true;
-      video.autoplay = false;
+      video.autoplay = true;
       video.loop = false;
-      video.removeAttribute("loop");
-      video.removeAttribute("autoplay");
+      video.setAttribute("muted", "");
+      video.setAttribute("playsinline", "");
+      video.setAttribute("autoplay", "");
 
       const blobUrl = URL.createObjectURL(blob);
-      let started = false;
 
-      const initPlayback = () => {
-        if (started) return;
-        started = true;
-        video.removeEventListener("loadedmetadata", initPlayback);
-        video.removeEventListener("canplay", initPlayback);
-
-        const onFirstSeeked = () => {
-          video.removeEventListener("seeked", onFirstSeeked);
-          isSeekingHUD = false;
-          const p = video.play();
-          if (p !== undefined) p.catch(() => {});
-        };
-
-        if (Math.abs(video.currentTime - startSec) > 0.05) {
-          video.addEventListener("seeked", onFirstSeeked, { once: true });
-          try {
-            isSeekingHUD = true;
+      const ensurePlayback = () => {
+        try {
+          if (startSec > 0 && Math.abs(video.currentTime - startSec) > 0.08) {
             video.currentTime = startSec;
-          } catch (e) {
-            video.play().catch(() => {});
           }
-        } else {
-          const p = video.play();
-          if (p !== undefined) p.catch(() => {});
+        } catch (e) {}
+        const p = video.play();
+        if (p !== undefined) {
+          p.catch((err) => {
+            console.debug("Live HUD playback deferred/notice:", err);
+          });
         }
       };
 
-      video.addEventListener("loadedmetadata", initPlayback, { once: true });
-      video.addEventListener("canplay", initPlayback, { once: true });
-      video.addEventListener("seeking", () => { isSeekingHUD = true; });
-      video.addEventListener("seeked", () => { isSeekingHUD = false; });
+      video.onloadedmetadata = ensurePlayback;
+      video.oncanplay = ensurePlayback;
+      video.onloadeddata = ensurePlayback;
 
       video.src = blobUrl;
       video.load();
+      ensurePlayback();
     };
 
     // Auto-transcode fallback if browser drops video track or fails to decode
@@ -1221,16 +1206,14 @@
     attachVideoSource(playableBlob);
 
     hudLoopHandler = () => {
-      if (video && !video.seeking && !isSeekingHUD) {
+      if (video && !video.seeking) {
         if (video.currentTime >= endSec || video.currentTime < startSec - 0.25) {
-          isSeekingHUD = true;
           video.currentTime = startSec;
         }
       }
     };
     video.addEventListener("timeupdate", hudLoopHandler);
     video.addEventListener("ended", () => {
-      isSeekingHUD = true;
       video.currentTime = startSec;
       video.play().catch(() => {});
     });
@@ -1270,9 +1253,8 @@
       ctx.clearRect(0, 0, cssW, cssH);
 
       // Enforce precise 60 FPS sub-clip loop boundaries
-      if (video && !video.paused && video.readyState >= 2 && !video.seeking && !isSeekingHUD) {
+      if (video && !video.paused && video.readyState >= 2 && !video.seeking) {
         if (video.currentTime >= endSec || video.currentTime < startSec - 0.25) {
-          isSeekingHUD = true;
           video.currentTime = startSec;
         }
       }
@@ -1294,6 +1276,13 @@
           drawW = cssH * videoRatio;
           drawX = (cssW - drawW) / 2;
           drawY = 0;
+        }
+
+        // 0. Render live video frame directly onto HUD canvas
+        if (video && video.readyState >= 2 && video.videoWidth > 0 && video.videoHeight > 0) {
+          try {
+            ctx.drawImage(video, drawX, drawY, drawW, drawH);
+          } catch (e) {}
         }
 
         // Determine target face box
