@@ -186,6 +186,13 @@
 
     document.body.classList.toggle("no-scroll", view === "landing");
     if (view !== "analyzing") stopAnalyzingHUD();
+    if (view !== "upload" && cropVideo) {
+      try {
+        if (cropPlayRaf) { cancelAnimationFrame(cropPlayRaf); cropPlayRaf = 0; }
+        cropVideo.pause();
+        cropVideo.muted = true;
+      } catch (e) {}
+    }
     if (view === "upload") resetUpload();
     if (view === "about-researchers") renderTeam();
     if (view === "benchmarks") renderBenchmarks();
@@ -852,12 +859,38 @@
   });
 
   // ── Video Playback Controls ──────────────────────────────────────────────
-  function togglePlay() {
-    if (cropVideo.paused) {
-      if (cropVideo.currentTime >= cropEnd || cropVideo.currentTime < cropStart) {
+  let cropPlayRaf = 0;
+  let isSeekingCrop = false;
+
+  function monitorCropPlayback() {
+    if (!cropVideo || cropVideo.paused || cropVideo.ended) {
+      if (cropPlayRaf) { cancelAnimationFrame(cropPlayRaf); cropPlayRaf = 0; }
+      return;
+    }
+
+    if (!cropVideo.seeking && !isSeekingCrop) {
+      if (cropVideo.currentTime >= cropEnd || cropVideo.currentTime < cropStart - 0.2) {
+        isSeekingCrop = true;
         cropVideo.currentTime = cropStart;
       }
-      cropVideo.play();
+    }
+
+    if (playerCurrTime) playerCurrTime.textContent = fmtTime(cropVideo.currentTime);
+    if (totalDuration > 0 && timelinePlayhead) {
+      const pct = (cropVideo.currentTime / totalDuration) * 100;
+      timelinePlayhead.style.left = `${pct}%`;
+    }
+
+    cropPlayRaf = requestAnimationFrame(monitorCropPlayback);
+  }
+
+  function togglePlay() {
+    if (cropVideo.paused) {
+      if (cropVideo.currentTime >= cropEnd - 0.05 || cropVideo.currentTime < cropStart - 0.05) {
+        isSeekingCrop = true;
+        cropVideo.currentTime = cropStart;
+      }
+      cropVideo.play().catch(() => {});
     } else {
       cropVideo.pause();
     }
@@ -872,6 +905,7 @@
 
   playerJumpStart?.addEventListener("click", (e) => {
     e.stopPropagation();
+    isSeekingCrop = true;
     cropVideo.currentTime = cropStart;
   });
 
@@ -881,25 +915,41 @@
     playerMuteBtn.classList.toggle("is-muted", cropVideo.muted);
   });
 
+  cropVideo?.addEventListener("seeking", () => { isSeekingCrop = true; });
+  cropVideo?.addEventListener("seeked", () => { isSeekingCrop = false; });
+
+  cropVideo?.addEventListener("ended", () => {
+    isSeekingCrop = true;
+    cropVideo.currentTime = cropStart;
+    cropVideo.play().catch(() => {});
+  });
+
   cropVideo?.addEventListener("play", () => {
     playerPlayBtn?.classList.add("is-playing");
     videoCenterIndicator?.classList.remove("is-paused");
     timelinePlayhead?.classList.add("active");
+    if (!cropPlayRaf) cropPlayRaf = requestAnimationFrame(monitorCropPlayback);
   });
 
   cropVideo?.addEventListener("pause", () => {
     playerPlayBtn?.classList.remove("is-playing");
     videoCenterIndicator?.classList.add("is-paused");
+    if (cropPlayRaf) { cancelAnimationFrame(cropPlayRaf); cropPlayRaf = 0; }
   });
 
   cropVideo?.addEventListener("timeupdate", () => {
-    playerCurrTime.textContent = fmtTime(cropVideo.currentTime);
-    if (totalDuration > 0) {
+    if (playerCurrTime) playerCurrTime.textContent = fmtTime(cropVideo.currentTime);
+    if (totalDuration > 0 && timelinePlayhead) {
       const pct = (cropVideo.currentTime / totalDuration) * 100;
       timelinePlayhead.style.left = `${pct}%`;
     }
+    if (!cropVideo.seeking && !isSeekingCrop) {
+      if (cropVideo.currentTime >= cropEnd || cropVideo.currentTime < cropStart - 0.2) {
+        isSeekingCrop = true;
+        cropVideo.currentTime = cropStart;
+      }
+    }
   });
-
 
   const showError = (m) => { uploadError.textContent = m; uploadError.hidden = false; };
   const hideError = () => (uploadError.hidden = true);
@@ -910,8 +960,13 @@
     filmstripAbort = true;
     fileInput.value = "";
     clearInterval(previewTimer);
+    if (cropPlayRaf) {
+      cancelAnimationFrame(cropPlayRaf);
+      cropPlayRaf = 0;
+    }
     if (cropVideo.src) {
       cropVideo.pause();
+      cropVideo.muted = true;
       cropVideo.removeAttribute("src");
       cropVideo.load();
     }
@@ -1077,12 +1132,17 @@
 
     if (!video || !canvas || !file) return;
 
-    // Pause cropVideo to release hardware decoding pipeline
+    // Explicitly pause and mute cropVideo to release hardware decoding pipeline
     if (cropVideo) {
-      try { cropVideo.pause(); } catch (e) {}
+      try {
+        if (cropPlayRaf) { cancelAnimationFrame(cropPlayRaf); cropPlayRaf = 0; }
+        cropVideo.pause();
+        cropVideo.muted = true;
+      } catch (e) {}
     }
 
     const playableBlob = activePreviewBlob || file;
+    let isSeekingHUD = false;
 
     const attachVideoSource = (blob) => {
       if (video.src && video.src.startsWith("blob:")) {
@@ -1091,24 +1151,46 @@
       video.muted = true;
       video.defaultMuted = true;
       video.playsInline = true;
-      video.autoplay = true;
-      video.loop = true;
+      video.autoplay = false;
+      video.loop = false;
+      video.removeAttribute("loop");
+      video.removeAttribute("autoplay");
 
       const blobUrl = URL.createObjectURL(blob);
-      const onReady = () => {
-        video.removeEventListener("loadedmetadata", onReady);
-        video.removeEventListener("canplay", onReady);
-        try {
-          if (startSec > 0 && startSec < (video.duration || 9999)) {
+      let started = false;
+
+      const initPlayback = () => {
+        if (started) return;
+        started = true;
+        video.removeEventListener("loadedmetadata", initPlayback);
+        video.removeEventListener("canplay", initPlayback);
+
+        const onFirstSeeked = () => {
+          video.removeEventListener("seeked", onFirstSeeked);
+          isSeekingHUD = false;
+          const p = video.play();
+          if (p !== undefined) p.catch(() => {});
+        };
+
+        if (Math.abs(video.currentTime - startSec) > 0.05) {
+          video.addEventListener("seeked", onFirstSeeked, { once: true });
+          try {
+            isSeekingHUD = true;
             video.currentTime = startSec;
+          } catch (e) {
+            video.play().catch(() => {});
           }
-        } catch (e) {}
-        const p = video.play();
-        if (p !== undefined) p.catch(() => {});
+        } else {
+          const p = video.play();
+          if (p !== undefined) p.catch(() => {});
+        }
       };
 
-      video.addEventListener("loadedmetadata", onReady, { once: true });
-      video.addEventListener("canplay", onReady, { once: true });
+      video.addEventListener("loadedmetadata", initPlayback, { once: true });
+      video.addEventListener("canplay", initPlayback, { once: true });
+      video.addEventListener("seeking", () => { isSeekingHUD = true; });
+      video.addEventListener("seeked", () => { isSeekingHUD = false; });
+
       video.src = blobUrl;
       video.load();
     };
@@ -1139,12 +1221,16 @@
     attachVideoSource(playableBlob);
 
     hudLoopHandler = () => {
-      if (video.currentTime >= endSec || video.currentTime < startSec - 0.2) {
-        video.currentTime = startSec;
+      if (video && !video.seeking && !isSeekingHUD) {
+        if (video.currentTime >= endSec || video.currentTime < startSec - 0.25) {
+          isSeekingHUD = true;
+          video.currentTime = startSec;
+        }
       }
     };
     video.addEventListener("timeupdate", hudLoopHandler);
     video.addEventListener("ended", () => {
+      isSeekingHUD = true;
       video.currentTime = startSec;
       video.play().catch(() => {});
     });
@@ -1182,6 +1268,14 @@
       ctx.save();
       ctx.scale(dpr, dpr);
       ctx.clearRect(0, 0, cssW, cssH);
+
+      // Enforce precise 60 FPS sub-clip loop boundaries
+      if (video && !video.paused && video.readyState >= 2 && !video.seeking && !isSeekingHUD) {
+        if (video.currentTime >= endSec || video.currentTime < startSec - 0.25) {
+          isSeekingHUD = true;
+          video.currentTime = startSec;
+        }
+      }
 
       if (cssW > 60 && cssH > 60) {
         // Video render aspect ratio & letterbox bounds
@@ -1626,6 +1720,18 @@
   // ── Live Stream Execution Tied to Real Backend Architecture ────────────────
   async function runAnalysis() {
     if (!selectedFile) return;
+
+    // Explicitly pause, stop, and mute cropVideo so it never plays in the background
+    if (cropVideo) {
+      try {
+        if (cropPlayRaf) { cancelAnimationFrame(cropPlayRaf); cropPlayRaf = 0; }
+        cropVideo.pause();
+        cropVideo.muted = true;
+        cropVideo.currentTime = cropStart;
+      } catch (e) {}
+    }
+    if (playerPlayBtn) playerPlayBtn.classList.remove("is-playing");
+    if (videoCenterIndicator) videoCenterIndicator.classList.add("is-paused");
 
     // Reset error card visibility
     const errCard = document.getElementById("analyzing-error-card");
