@@ -760,9 +760,9 @@
       generateFilmstrip(previewBlob);
     };
 
-    // If format is non-native browser container (e.g. .avi, .mkv, .mov, .flv, .wmv)
-    const isKnownNonNativeExt = !file.name.match(/\.(mp4|webm)$/i);
-    if (isKnownNonNativeExt) {
+    // Only transcode non-standard legacy containers (.avi, .mkv, .flv, .wmv)
+    const isLegacyExt = !file.name.match(/\.(mp4|webm|mov)$/i);
+    if (isLegacyExt) {
       try {
         if (uploadTitle) uploadTitle.textContent = "Optimizing legacy video for browser display...";
         const transcodedBlob = await fetchPreviewTranscode(file);
@@ -779,7 +779,7 @@
       }
     }
 
-    // Attempt browser native loading
+    // Attempt instant browser native loading for mp4, mov, webm
     const tempVideo = document.createElement("video");
     tempVideo.preload = "auto";
     const tempBlobUrl = URL.createObjectURL(file);
@@ -818,11 +818,6 @@
         try { URL.revokeObjectURL(tempBlobUrl); } catch (e) {}
         resetUpload();
         return showError(`Video is too short (${dur.toFixed(1)}s). Please upload a video at least 3 seconds long.`);
-      }
-
-      // Detect legacy MPEG-4 Part 2 or unsupported video stream where browser drops video track (videoWidth === 0)
-      if (tempVideo.videoWidth === 0 || tempVideo.videoHeight === 0) {
-        return handleFallbackTranscode();
       }
 
       handled = true;
@@ -1082,16 +1077,40 @@
 
     if (!video || !canvas || !file) return;
 
+    // Pause cropVideo to release hardware decoding pipeline
+    if (cropVideo) {
+      try { cropVideo.pause(); } catch (e) {}
+    }
+
     const playableBlob = activePreviewBlob || file;
 
     const attachVideoSource = (blob) => {
       if (video.src && video.src.startsWith("blob:")) {
         try { URL.revokeObjectURL(video.src); } catch (e) {}
       }
-      video.src = URL.createObjectURL(blob);
-      video.currentTime = startSec;
       video.muted = true;
-      video.play().catch(() => {});
+      video.defaultMuted = true;
+      video.playsInline = true;
+      video.autoplay = true;
+      video.loop = true;
+
+      const blobUrl = URL.createObjectURL(blob);
+      const onReady = () => {
+        video.removeEventListener("loadedmetadata", onReady);
+        video.removeEventListener("canplay", onReady);
+        try {
+          if (startSec > 0 && startSec < (video.duration || 9999)) {
+            video.currentTime = startSec;
+          }
+        } catch (e) {}
+        const p = video.play();
+        if (p !== undefined) p.catch(() => {});
+      };
+
+      video.addEventListener("loadedmetadata", onReady, { once: true });
+      video.addEventListener("canplay", onReady, { once: true });
+      video.src = blobUrl;
+      video.load();
     };
 
     // Auto-transcode fallback if browser drops video track or fails to decode
