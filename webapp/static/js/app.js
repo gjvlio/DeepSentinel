@@ -766,72 +766,49 @@
       generateFilmstrip(previewBlob);
     };
 
-    // Only transcode non-standard legacy containers (.avi, .mkv, .flv, .wmv)
-    const isLegacyExt = !file.name.match(/\.(mp4|webm|mov)$/i);
-    if (isLegacyExt) {
-      try {
-        if (uploadTitle) uploadTitle.textContent = "Optimizing legacy video for browser display...";
-        const transcodedBlob = await fetchPreviewTranscode(file);
-        const tempVid = document.createElement("video");
-        tempVid.preload = "metadata";
-        tempVid.onloadedmetadata = () => {
-          const dur = tempVid.duration || 10.0;
-          setupPlayer(transcodedBlob, dur, true);
-        };
-        tempVid.src = URL.createObjectURL(transcodedBlob);
-        return;
-      } catch (e) {
-        console.warn("Transcode fallback error:", e);
-      }
-    }
-
-    // Attempt instant browser native loading for mp4, mov, webm
-    const tempVideo = document.createElement("video");
-    tempVideo.preload = "auto";
-    const tempBlobUrl = URL.createObjectURL(file);
-    let handled = false;
-
-    const handleFallbackTranscode = async () => {
-      if (handled) return;
-      handled = true;
-      try { URL.revokeObjectURL(tempBlobUrl); } catch (e) {}
-      try {
-        if (uploadTitle) uploadTitle.textContent = "Optimizing legacy video stream for browser display...";
-        const transcodedBlob = await fetchPreviewTranscode(file);
-        const transVid = document.createElement("video");
-        transVid.preload = "metadata";
-        transVid.onloadedmetadata = () => {
-          const dur = transVid.duration || 10.0;
-          setupPlayer(transcodedBlob, dur, true);
-        };
-        transVid.src = URL.createObjectURL(transcodedBlob);
-      } catch (err) {
-        console.error("Transcode failed:", err);
+    // Transcode upload into standard web-optimized H.264 MP4 (8-bit YUV420P, orientation-corrected)
+    try {
+      if (uploadTitle) uploadTitle.textContent = "Optimizing video stream for browser display...";
+      const transcodedBlob = await fetchPreviewTranscode(file);
+      const tempVid = document.createElement("video");
+      tempVid.preload = "metadata";
+      tempVid.onloadedmetadata = () => {
+        const dur = tempVid.duration || 10.0;
+        if (dur > 600.5) {
+          resetUpload();
+          return showError(`Video exceeds 10 minutes (${(dur / 60).toFixed(1)} min). Maximum upload length is 10 minutes.`);
+        }
+        if (dur < 2.9) {
+          resetUpload();
+          return showError(`Video is too short (${dur.toFixed(1)}s). Please upload a video at least 3 seconds long.`);
+        }
+        setupPlayer(transcodedBlob, dur, true);
+      };
+      tempVid.src = URL.createObjectURL(transcodedBlob);
+    } catch (err) {
+      console.warn("Transcode fallback notice, trying direct native playback:", err);
+      const tempVideo = document.createElement("video");
+      tempVideo.preload = "auto";
+      const tempBlobUrl = URL.createObjectURL(file);
+      tempVideo.onloadedmetadata = () => {
+        const dur = tempVideo.duration || 10.0;
+        if (dur > 600.5) {
+          try { URL.revokeObjectURL(tempBlobUrl); } catch (e) {}
+          resetUpload();
+          return showError(`Video exceeds 10 minutes (${(dur / 60).toFixed(1)} min). Maximum upload length is 10 minutes.`);
+        }
+        if (dur < 2.9) {
+          try { URL.revokeObjectURL(tempBlobUrl); } catch (e) {}
+          resetUpload();
+          return showError(`Video is too short (${dur.toFixed(1)}s). Please upload a video at least 3 seconds long.`);
+        }
+        setupPlayer(file, dur, false);
+      };
+      tempVideo.onerror = () => {
         setupPlayer(file, 10.0, false);
-      }
-    };
-
-    tempVideo.onerror = handleFallbackTranscode;
-
-    tempVideo.onloadedmetadata = async () => {
-      const dur = tempVideo.duration;
-      if (dur && dur > 600.5) {
-        try { URL.revokeObjectURL(tempBlobUrl); } catch (e) {}
-        resetUpload();
-        return showError(`Video exceeds 10 minutes (${(dur / 60).toFixed(1)} min). Maximum upload length is 10 minutes.`);
-      }
-      if (dur && dur < 2.9) {
-        try { URL.revokeObjectURL(tempBlobUrl); } catch (e) {}
-        resetUpload();
-        return showError(`Video is too short (${dur.toFixed(1)}s). Please upload a video at least 3 seconds long.`);
-      }
-
-      handled = true;
-      try { URL.revokeObjectURL(tempBlobUrl); } catch (e) {}
-      setupPlayer(file, dur || 10.0, false);
-    };
-
-    tempVideo.src = tempBlobUrl;
+      };
+      tempVideo.src = tempBlobUrl;
+    }
   }
 
   // Presets
