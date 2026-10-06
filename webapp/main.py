@@ -513,12 +513,12 @@ async def transcode_preview(file: UploadFile = File(...)):
         with tmp_in.open("wb") as f:
             shutil.copyfileobj(file.file, f)
 
-        # Transcode with ultrafast preset to web-friendly H.264 / AAC with faststart
+        # Transcode with ultrafast preset to web-friendly H.264 / AAC with faststart & strict 8-bit YUV420p
         cmd = [
             "ffmpeg", "-y", "-hide_banner", "-loglevel", "error",
             "-i", str(tmp_in),
-            "-vf", "scale=-2:min(720\,ih)",
-            "-c:v", "libx264", "-preset", "ultrafast", "-tune", "fastdecode", "-crf", "26",
+            "-vf", "scale=trunc(iw/2)*2:trunc(ih/2)*2",
+            "-c:v", "libx264", "-pix_fmt", "yuv420p", "-preset", "ultrafast", "-tune", "fastdecode", "-crf", "23",
             "-c:a", "aac", "-b:a", "128k",
             "-movflags", "+faststart",
             str(tmp_out),
@@ -529,12 +529,13 @@ async def transcode_preview(file: UploadFile = File(...)):
             raise HTTPException(status_code=500, detail=f"Preview transcode failed: {r.stderr}")
 
         content = tmp_out.read_bytes()
-        return StreamingResponse(
-            io.BytesIO(content),
+        return Response(
+            content=content,
             media_type="video/mp4",
             headers={
                 "Content-Disposition": f'inline; filename="preview_{Path(clean_name).stem}.mp4"',
                 "Content-Length": str(len(content)),
+                "Accept-Ranges": "bytes",
                 "Cache-Control": "no-store",
             },
         )
