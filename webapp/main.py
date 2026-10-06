@@ -361,6 +361,7 @@ def _prepare_clip(
                 else:
                     log.warning(f"ffmpeg trim notice: {r.stderr}; using source file")
             except Exception as e:
+                log.warning(f"ffmpeg slicing exception ({e}); using source file")
 
         # If untrimmed video has rotation metadata or non-mp4 format, remux/transcode to upright CFR H.264 mp4
         if clip_to_eval == dest and _check_video_needs_normalization(dest):
