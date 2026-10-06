@@ -424,6 +424,14 @@ class ModelService:
             t_sarc = float(getattr(settings, "sarcasm_temperature", 1.30) or 1.30)
             p_sarc = float(torch.sigmoid((raw_sarcasm.squeeze() - bias) / t_sarc).item())
 
+            # Concordant Sincere Calibration: When acoustic and visual emotions agree on genuine happiness
+            # without explicit deadpan/irony markers, sincere greetings ("nice to meet you") must not be
+            # misattributed as sarcasm due to sitcom dataset prosody bias.
+            t_lower_early = (transcript or "").lower()
+            has_deadpan_early = any(w in t_lower_early for w in DEADPAN_LEXICAL_MARKERS)
+            if int(torch.argmax(pa).item()) == 1 and int(torch.argmax(pb).item()) == 1 and not has_deadpan_early:
+                p_sarc = min(p_sarc * 0.20, 0.22)
+
             # ── Information-Theoretic Synchrony Engine (D_JS & CosSim) ───
             eps = 1e-12
             p_a_safe = (pa + eps) / (pa.sum() + eps * 6)
@@ -612,7 +620,7 @@ class ModelService:
         t_lower = (transcript or "").lower()
         has_deadpan_marker = any(w in t_lower for w in DEADPAN_LEXICAL_MARKERS)
         is_deadpan_joke = (has_deadpan_marker and p_sarc >= 0.35) or (p_sarc >= 0.65 and not emotions_match)
-        is_playful_sarcasm = (has_deadpan_marker and p_sarc >= 0.55 and emotions_match) or (p_sarc >= 0.85 and emotions_match)
+        is_playful_sarcasm = (has_deadpan_marker and p_sarc >= 0.50 and emotions_match)
         sarcastic = is_deadpan_joke or is_playful_sarcasm
 
         ea_title = emo_a.strip().title()
