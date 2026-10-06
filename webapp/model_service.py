@@ -482,7 +482,10 @@ class ModelService:
             # 2. Concordant Emotional Synchrony (Biological Harmony Prior):
             elif top_a_idx == top_b_idx and top_a_idx != 0:
                 if has_conv_affect or top_a_idx == 1 or raw_val < 1.00:
-                    emo_bonus = float(getattr(settings, "active_emotion_harmony_bonus", 2.75) or 2.75)
+                    base_bonus = float(getattr(settings, "active_emotion_harmony_bonus", 2.75) or 2.75)
+                    if top_a_idx == 1 and has_conv_affect:
+                        base_bonus = max(base_bonus, 3.20 + 0.80 * float(pa[1].item())) * max(0.25, synth_damp)
+                    emo_bonus = base_bonus
                 else:
                     emo_bonus = 0.0
             # 3. Neutral baseline speech (only when genuine resting baseline, NOT FaceSwap smile):
