@@ -517,9 +517,11 @@ async def transcode_preview(file: UploadFile = File(...)):
         cmd = [
             "ffmpeg", "-y", "-hide_banner", "-loglevel", "error",
             "-i", str(tmp_in),
+            "-map", "0:v:0",
+            "-map", "0:a?",
             "-vf", "scale=trunc(iw/2)*2:trunc(ih/2)*2",
             "-c:v", "libx264", "-pix_fmt", "yuv420p", "-preset", "ultrafast", "-tune", "fastdecode", "-crf", "23",
-            "-c:a", "aac", "-b:a", "128k",
+            "-c:a", "aac", "-b:a", "128k", "-ac", "2",
             "-movflags", "+faststart",
             str(tmp_out),
         ]

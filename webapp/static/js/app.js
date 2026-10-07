@@ -100,7 +100,7 @@
     const a = e.target.closest("a[data-link]");
     if (!a) return;
     e.preventDefault();
-    navigate(routePath(a.getAttribute("href")));
+    navigate(a.getAttribute("href"));
   });
   window.addEventListener("popstate", render);
 
@@ -630,6 +630,12 @@
       }
       cropVideo.src = URL.createObjectURL(previewBlob);
       cropVideo.currentTime = 0;
+      cropVideo.muted = false;
+      cropVideo.volume = 1.0;
+      playerMuteBtn?.classList.remove("is-muted");
+      playerPlayBtn?.classList.remove("is-playing", "is-ended");
+      videoCenterIndicator?.classList.add("is-paused");
+      videoCenterIndicator?.classList.remove("is-ended");
 
       // Replace dropzone completely with clip selector
       dropzone.hidden = true;
@@ -714,21 +720,29 @@
     updateTimelineUI();
   });
 
-  // ── Video Playback Controls ──────────────────────────────────────────────
+  // ── Video Playback Controls (Non-Continuous with Clean Replay & Audio) ──
   let cropPlayRaf = 0;
   let isSeekingCrop = false;
+
+  function endClipPlayback() {
+    if (!cropVideo) return;
+    if (cropPlayRaf) { cancelAnimationFrame(cropPlayRaf); cropPlayRaf = 0; }
+    cropVideo.pause();
+    isSeekingCrop = true;
+    cropVideo.currentTime = cropStart;
+    playerPlayBtn?.classList.remove("is-playing");
+    playerPlayBtn?.classList.add("is-ended");
+    videoCenterIndicator?.classList.add("is-paused", "is-ended");
+    if (playerCurrTime) playerCurrTime.textContent = fmtTime(cropStart);
+    if (timelinePlayhead && totalDuration > 0) {
+      timelinePlayhead.style.left = `${(cropStart / totalDuration) * 100}%`;
+    }
+  }
 
   function monitorCropPlayback() {
     if (!cropVideo || cropVideo.paused || cropVideo.ended) {
       if (cropPlayRaf) { cancelAnimationFrame(cropPlayRaf); cropPlayRaf = 0; }
       return;
-    }
-
-    if (!cropVideo.seeking && !isSeekingCrop) {
-      if (cropVideo.currentTime >= cropEnd || cropVideo.currentTime < cropStart - 0.2) {
-        isSeekingCrop = true;
-        cropVideo.currentTime = cropStart;
-      }
     }
 
     if (playerCurrTime) playerCurrTime.textContent = fmtTime(cropVideo.currentTime);
@@ -737,16 +751,44 @@
       timelinePlayhead.style.left = `${pct}%`;
     }
 
+    if (!cropVideo.seeking && !isSeekingCrop) {
+      if (cropVideo.currentTime >= cropEnd) {
+        endClipPlayback();
+        return;
+      }
+    }
+
     cropPlayRaf = requestAnimationFrame(monitorCropPlayback);
   }
 
   function togglePlay() {
-    if (cropVideo.paused) {
-      if (cropVideo.currentTime >= cropEnd - 0.05 || cropVideo.currentTime < cropStart - 0.05) {
+    if (!cropVideo) return;
+
+    if (cropVideo.paused || cropVideo.ended || playerPlayBtn?.classList.contains("is-ended")) {
+      // If we are at the end, outside the window, or in ended/replay state, restart from cropStart
+      if (
+        playerPlayBtn?.classList.contains("is-ended") ||
+        cropVideo.currentTime >= cropEnd - 0.05 ||
+        cropVideo.currentTime < cropStart - 0.05
+      ) {
         isSeekingCrop = true;
         cropVideo.currentTime = cropStart;
       }
-      cropVideo.play().catch(() => {});
+
+      playerPlayBtn?.classList.remove("is-ended");
+      videoCenterIndicator?.classList.remove("is-ended");
+
+      const playPromise = cropVideo.play();
+      if (playPromise && typeof playPromise.catch === "function") {
+        playPromise.catch((err) => {
+          console.warn("Audio/Video playback policy fallback:", err);
+          if (cropVideo.paused) {
+            cropVideo.muted = true;
+            playerMuteBtn?.classList.add("is-muted");
+            cropVideo.play().catch(() => {});
+          }
+        });
+      }
     } else {
       cropVideo.pause();
     }
@@ -763,6 +805,12 @@
     e.stopPropagation();
     isSeekingCrop = true;
     cropVideo.currentTime = cropStart;
+    playerPlayBtn?.classList.remove("is-ended");
+    videoCenterIndicator?.classList.remove("is-ended");
+    if (playerCurrTime) playerCurrTime.textContent = fmtTime(cropStart);
+    if (totalDuration > 0 && timelinePlayhead) {
+      timelinePlayhead.style.left = `${(cropStart / totalDuration) * 100}%`;
+    }
   });
 
   playerMuteBtn?.addEventListener("click", (e) => {
@@ -775,14 +823,13 @@
   cropVideo?.addEventListener("seeked", () => { isSeekingCrop = false; });
 
   cropVideo?.addEventListener("ended", () => {
-    isSeekingCrop = true;
-    cropVideo.currentTime = cropStart;
-    cropVideo.play().catch(() => {});
+    endClipPlayback();
   });
 
   cropVideo?.addEventListener("play", () => {
     playerPlayBtn?.classList.add("is-playing");
-    videoCenterIndicator?.classList.remove("is-paused");
+    playerPlayBtn?.classList.remove("is-ended");
+    videoCenterIndicator?.classList.remove("is-paused", "is-ended");
     timelinePlayhead?.classList.add("active");
     if (!cropPlayRaf) cropPlayRaf = requestAnimationFrame(monitorCropPlayback);
   });
@@ -799,10 +846,9 @@
       const pct = (cropVideo.currentTime / totalDuration) * 100;
       timelinePlayhead.style.left = `${pct}%`;
     }
-    if (!cropVideo.seeking && !isSeekingCrop) {
-      if (cropVideo.currentTime >= cropEnd || cropVideo.currentTime < cropStart - 0.2) {
-        isSeekingCrop = true;
-        cropVideo.currentTime = cropStart;
+    if (!cropVideo.seeking && !isSeekingCrop && !cropVideo.paused) {
+      if (cropVideo.currentTime >= cropEnd) {
+        endClipPlayback();
       }
     }
   });
@@ -1502,7 +1548,7 @@
       reselectBtn.onclick = () => {
         if (errorCard) errorCard.hidden = true;
         if (statusCard) statusCard.hidden = false;
-        navigate(routePath("/upload"));
+        navigate("/upload");
       };
     }
 
@@ -1511,7 +1557,7 @@
         if (errorCard) errorCard.hidden = true;
         if (statusCard) statusCard.hidden = false;
         resetUpload();
-        navigate(routePath("/upload"));
+        navigate("/upload");
       };
     }
   }
@@ -1552,7 +1598,7 @@
 
       fileEl.append(fnSpan, metaSpan);
     }
-    navigate(routePath("/analyzing"));
+    navigate("/analyzing");
 
     // Reset detection state
     insightFaceKeyframes = [];

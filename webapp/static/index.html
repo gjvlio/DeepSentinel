@@ -185,7 +185,8 @@
           <div class="crop-video-container" id="video-wrapper">
             <video id="crop-video" preload="metadata" playsinline></video>
             <div id="video-center-indicator" class="video-center-indicator">
-              <svg viewBox="0 0 24 24" fill="currentColor"><polygon points="6 4 19 12 6 20 6 4"/></svg>
+              <svg class="center-icon-play" viewBox="0 0 24 24" fill="currentColor"><polygon points="6 4 19 12 6 20 6 4"/></svg>
+              <svg class="center-icon-replay" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2.2" stroke-linecap="round" stroke-linejoin="round"><path d="M1 4v6h6"/><path d="M3.51 15a9 9 0 1 0 2.13-9.36L1 10"/></svg>
             </div>
 
             <!-- Bottom Glass Player Controls -->
@@ -193,6 +194,7 @@
               <button id="player-play-btn" type="button" class="player-btn" aria-label="Play/Pause">
                 <svg class="icon-play" viewBox="0 0 24 24" fill="currentColor"><polygon points="6 4 19 12 6 20 6 4"/></svg>
                 <svg class="icon-pause" viewBox="0 0 24 24" fill="currentColor"><rect x="6" y="4" width="4" height="16"/><rect x="14" y="4" width="4" height="16"/></svg>
+                <svg class="icon-replay" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2.2" stroke-linecap="round" stroke-linejoin="round"><path d="M1 4v6h6"/><path d="M3.51 15a9 9 0 1 0 2.13-9.36L1 10"/></svg>
               </button>
               <div class="player-time-display">
                 <span id="player-curr-time">00:00.0</span> <span class="time-sep">/</span> <span id="player-total-time">00:00.0</span>
@@ -634,6 +636,6 @@
 
   </main>
 
-  <script src="/static/js/app.js?v=29"></script>
+  <script src="/static/js/app.js?v=31"></script>
 </body>
 </html>

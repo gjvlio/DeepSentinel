@@ -253,17 +253,27 @@ em { font-style: italic; font-family: var(--f-serif); font-weight: 400;
 
 /* Center pulse indicator (when playing / pausing) */
 .video-center-indicator { position: absolute; width: 56px; height: 56px; top: 50%; left: 50%; margin: -28px 0 0 -28px; border-radius: 50%; background: rgba(15,23,42,0.72); border: 1.5px solid rgba(255,255,255,0.4); backdrop-filter: blur(8px); display: grid; place-items: center; color: #fff; pointer-events: none; opacity: 0; transform: scale(0.85); transition: opacity .25s var(--e-out), transform .25s var(--e-out); z-index: 5; }
-.video-center-indicator svg { width: 22px; height: 22px; margin-left: 2px; }
+.video-center-indicator svg { width: 22px; height: 22px; }
+.video-center-indicator .center-icon-play { margin-left: 2px; display: block; }
+.video-center-indicator .center-icon-replay { display: none; }
+.video-center-indicator.is-ended .center-icon-play { display: none; }
+.video-center-indicator.is-ended .center-icon-replay { display: block; }
 .crop-video-container:hover .video-center-indicator.is-paused { opacity: 0.9; transform: scale(1); }
+.video-center-indicator.is-ended { opacity: 0.95; transform: scale(1); }
 
 /* Bottom Glass Player Control Bar (Compact 42px) */
 .video-control-bar { position: absolute; bottom: 0; left: 0; right: 0; height: 42px; padding: 0 14px; background: linear-gradient(0deg, rgba(10,12,16,0.92) 0%, rgba(10,12,16,0.6) 70%, transparent 100%); display: flex; align-items: center; gap: 12px; z-index: 10; cursor: default; }
 .player-btn { background: rgba(255,255,255,0.12); border: 1px solid rgba(255,255,255,0.22); color: #fff; border-radius: 50%; width: 28px; height: 28px; display: grid; place-items: center; cursor: pointer; transition: background .2s, transform .15s; }
 .player-btn:hover { background: rgba(255,255,255,0.26); transform: scale(1.05); }
 .player-btn svg { width: 14px; height: 14px; }
-.player-btn .icon-pause { display: none; }
-.player-btn.is-playing .icon-play { display: none; }
+.player-btn .icon-pause,
+.player-btn .icon-replay { display: none; }
+.player-btn.is-playing .icon-play,
+.player-btn.is-playing .icon-replay { display: none; }
 .player-btn.is-playing .icon-pause { display: block; }
+.player-btn.is-ended .icon-play,
+.player-btn.is-ended .icon-pause { display: none; }
+.player-btn.is-ended .icon-replay { display: block; }
 
 .player-time-display { font-family: var(--f-mono); font-size: 12px; color: #e2e4e9; letter-spacing: 0.02em; display: flex; align-items: center; gap: 4px; }
 .player-time-display .time-sep { color: rgba(255,255,255,0.4); }
