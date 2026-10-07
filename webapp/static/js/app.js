@@ -1052,10 +1052,11 @@
       video.defaultMuted = true;
       video.playsInline = true;
       video.autoplay = true;
-      video.loop = false;
+      video.loop = true;
       video.setAttribute("muted", "");
       video.setAttribute("playsinline", "");
       video.setAttribute("autoplay", "");
+      video.setAttribute("loop", "");
 
       const blobUrl = URL.createObjectURL(blob);
 
@@ -1109,8 +1110,9 @@
 
     hudLoopHandler = () => {
       if (video && !video.seeking) {
-        if (video.currentTime >= endSec || video.currentTime < startSec - 0.25) {
+        if (video.currentTime >= endSec - 0.05 || video.currentTime < startSec - 0.25) {
           video.currentTime = startSec;
+          if (video.paused) video.play().catch(() => {});
         }
       }
     };
@@ -1118,6 +1120,11 @@
     video.addEventListener("ended", () => {
       video.currentTime = startSec;
       video.play().catch(() => {});
+    });
+    video.addEventListener("pause", () => {
+      if (document.querySelector('.view[data-view="analyzing"]')?.classList.contains("active") && !video.seeking) {
+        video.play().catch(() => {});
+      }
     });
 
     startClientFaceTracking(video);
@@ -1154,10 +1161,14 @@
       ctx.scale(dpr, dpr);
       ctx.clearRect(0, 0, cssW, cssH);
 
-      // Enforce precise 60 FPS sub-clip loop boundaries
-      if (video && !video.paused && video.readyState >= 2 && !video.seeking) {
-        if (video.currentTime >= endSec || video.currentTime < startSec - 0.25) {
+      // Enforce precise 60 FPS sub-clip loop boundaries and continuous playback
+      if (video && !video.seeking) {
+        if (video.currentTime >= endSec - 0.05 || video.currentTime < startSec - 0.25) {
           video.currentTime = startSec;
+          if (video.paused) video.play().catch(() => {});
+        }
+        if (video.paused && document.querySelector('.view[data-view="analyzing"]')?.classList.contains("active")) {
+          video.play().catch(() => {});
         }
       }
 
