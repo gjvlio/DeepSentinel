@@ -554,8 +554,6 @@ if STATIC_DIR.exists() and (STATIC_DIR / "index.html").exists():
     SPA_PATHS = {
         "/", "/upload", "/analyzing", "/results",
         "/about", "/about/thesis", "/about/researchers",
-        "/demo", "/demo/upload", "/demo/analyzing", "/demo/results",
-        "/demo/about", "/demo/about/thesis", "/demo/about/researchers",
     }
 
     @app.get("/{full_path:path}", include_in_schema=False)

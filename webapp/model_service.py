@@ -756,52 +756,65 @@ class ModelService:
                 raise RuntimeError("No model equipped — train a checkpoint first.")
             meta = self._meta
 
-        # Enforce video duration bounds (3 - 20 seconds)
-        if video_path.suffix.lower() in {".mp4", ".mov", ".avi", ".mkv", ".webm"}:
-            try:
-                import cv2
-                cap = cv2.VideoCapture(str(video_path))
-                if cap.isOpened():
-                    fps = cap.get(cv2.CAP_PROP_FPS) or 25.0
-                    frame_count = cap.get(cv2.CAP_PROP_FRAME_COUNT) or 0
-                    dur = frame_count / fps if fps > 0 else 0
-                    cap.release()
-                    if dur > 0:
-                        if dur < settings.min_duration_sec - 0.2:
-                            raise ValueError(
-                                f"Video is too short ({dur:.1f}s). Evaluated clip must be at least {settings.min_duration_sec:.1f} seconds long."
-                            )
-                        if dur > settings.max_duration_sec + 0.8:
-                            raise ValueError(
-                                f"Video is too long ({dur:.1f}s). Evaluated clip must be at most {settings.max_duration_sec:.1f} seconds long."
-                            )
-            except ValueError:
-                raise
-            except Exception as e:
-                log.debug(f"Duration check bypass: {e}")
-
         clip_id = clip_id or f"upload_{uuid.uuid4().hex[:12]}"
+
+        # Step 1: Container & Stream Validation
+        inspection = inspect_video_stream(video_path)
+        validate_container(inspection, min_duration=settings.min_duration_sec, max_duration=settings.max_upload_duration_sec)
+
+        # Step 2: Audio Track & Sound Energy Validation
+        wav = self.pipeline._wav_path(clip_id)
+        if not wav.exists():
+            from src.preprocessing.audio import extract_audio_to_wav
+            ok = extract_audio_to_wav(video_path, wav)
+            if not ok or not wav.exists():
+                raise InputValidationError(
+                    code="ERR_AUDIO_EXTRACTION_FAILED",
+                    title="Audio Extraction Failed",
+                    message="Failed to extract an audio stream from the video container.",
+                    suggestion="Ensure the video has a standard AAC/MP3 audio track and re-export if needed.",
+                )
+        validate_audio_track(inspection, wav)
+
+        # Step 3: Speech Recognition & Dialogue Intelligibility Gate
+        from src.preprocessing.audio import transcribe_with_meta
+        txt_file = self.pipeline._txt_path(clip_id)
+        meta_res = transcribe_with_meta(wav, self.pipeline.whisper_model, device=self.device)
+        raw_transcript = meta_res.get("text", "")
+        detected_language = meta_res.get("language", "en")
+        txt_file.write_text(raw_transcript, encoding="utf-8")
+
+        clean_transcript = validate_speech_presence(
+            raw_transcript,
+            min_words=2,
+            no_speech_prob=meta_res.get("no_speech_prob", 0.0),
+            avg_logprob=meta_res.get("avg_logprob", 0.0),
+            compression_ratio=meta_res.get("compression_ratio", 1.0),
+        )
+
+        # Step 4: Face Detection & Visual Clarity Gate (minimum 50% face visibility)
+        faces, frames_sampled, face_crops, face_scores = self._extract_face_landmarks_and_crops(video_path, max_samples=16)
+        validate_face_and_visual_quality(frames_sampled, face_crops, face_scores, min_face_ratio=0.50)
+
+        # Step 5: Feature Extraction & Neural Forward Pass
         feats = self.pipeline.process(clip_id, video_path)
         if feats is None:
-            raise ValueError("Preprocessing failed — could not extract features "
-                             "(check that the video has a visible face and audio).")
+            raise ValueError("Preprocessing failed — could not extract features (check video face and audio).")
 
         z_at = feats.z_at.unsqueeze(0).float().to(self.device)  # (1, 1536)
         z_v = feats.z_v.unsqueeze(0).float().to(self.device)    # (1, 768)
 
-        clean_transcript = sanitize_transcript(feats.transcript or "")
-        has_speech = bool(clean_transcript and len(clean_transcript.strip()) > 0)
-        out = self.model.forward_from_features(z_at, z_v, z_at_emo=z_at, has_speech=has_speech)
+        out = self.model.forward_from_features(z_at, z_v, z_at_emo=z_at, has_speech=True)
 
         det_result, _ = self._fuse_and_calibrate_verdict(
             raw_logit=out.logit,
             raw_sarcasm=out.sarcasm,
             raw_emo_a=out.emotion_a,
             raw_emo_b=out.emotion_b,
-            has_speech=has_speech,
+            has_speech=True,
             transcript=clean_transcript,
             meta=meta,
-            language=getattr(feats, "language", "en") or "en",
+            language=detected_language or getattr(feats, "language", "en") or "en",
         )
         return det_result
 
@@ -1071,6 +1084,7 @@ class ModelService:
         from src.preprocessing.audio import transcribe_with_meta
         txt_file = self.pipeline._txt_path(clip_id)
         detected_language = "en"
+        meta_res = {}
         if not txt_file.exists():
             if wav.exists() and wav.stat().st_size > 500:
                 meta_res = transcribe_with_meta(wav, self.pipeline.whisper_model, device=self.device)
@@ -1081,11 +1095,18 @@ class ModelService:
             txt_file.write_text(transcript, encoding="utf-8")
         else:
             transcript = txt_file.read_text(encoding="utf-8").strip()
-
-        transcript = sanitize_transcript(transcript)
+            if wav.exists() and wav.stat().st_size > 500:
+                meta_res = transcribe_with_meta(wav, self.pipeline.whisper_model, device=self.device)
+                detected_language = meta_res.get("language", "en")
 
         try:
-            validate_speech_presence(transcript, min_words=1)
+            transcript = validate_speech_presence(
+                transcript,
+                min_words=2,
+                no_speech_prob=meta_res.get("no_speech_prob", 0.0),
+                avg_logprob=meta_res.get("avg_logprob", 0.0),
+                compression_ratio=meta_res.get("compression_ratio", 1.0),
+            )
         except InputValidationError as e:
             yield {"error": e.to_dict()}
             return

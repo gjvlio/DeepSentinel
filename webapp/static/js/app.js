@@ -32,7 +32,6 @@
   const ROUTES = {
     "/": "landing", "/upload": "upload", "/analyzing": "analyzing", "/results": "results",
     "/about": "about-thesis", "/about/thesis": "about-thesis", "/about/researchers": "about-researchers",
-    "/benchmarks": "benchmarks",
   };
 
   const views = {};
@@ -41,122 +40,6 @@
 
   let selectedFile = null;
   let lastResult = null;
-  let demoMode = location.pathname.startsWith("/demo");
-  let demoResultIndex = 0;
-
-  const demoServedBy = {
-    loaded: true,
-    checkpoint: "demo-static",
-    checkpoint_path: null,
-    phase: 0,
-    epoch: null,
-    val_loss: null,
-    last_modified: null,
-    device: "demo",
-    warmed: true,
-    note: "Hardcoded demo result",
-  };
-
-  const DEMO_RESULTS = [
-    () => ({
-      verdict: "FAKE",
-      p_fake: 0.74,
-      threshold: 0.5,
-      audio_text_emotion: {
-        label: "happy",
-        confidence: 0.61,
-        distribution: { neutral: 0.11, happy: 0.61, sad: 0.08, angry: 0.10, fear: 0.05, disgust: 0.05 },
-      },
-      visual_emotion: {
-        label: "sad",
-        confidence: 0.64,
-        distribution: { neutral: 0.09, happy: 0.06, sad: 0.64, angry: 0.11, fear: 0.05, disgust: 0.05 },
-      },
-      emotion_mismatch: { neutral: 0.08, happy: 0.61, sad: 0.68, angry: 0.42, fear: 0.21, disgust: 0.17 },
-      p_sarcasm: 0.12,
-      transcript: "I am absolutely thrilled to be here.",
-      forensic_interpretation: {
-        state_id: "STATE_FAKE_EMOTION_DESYNC",
-        state_tag: "FAKE · EMOTION CLASH",
-        headline: "Likely Deepfake: Voice and face emotions contradict each other",
-        summary: "Voice sounds Happy (61%), but the face looks Sad (64%). This sharp contradiction happens when voice or video is swapped.",
-        voice_face_analysis: "Sharp contradiction: Hearing happiness while seeing sadness does not happen in sincere human speech.",
-        sarcasm_analysis: "Sarcasm is low (12%), confirming this clash is an AI flaw, not a joke.",
-        technical_rationale: "Deepfake tools usually replace voice or face separately, leaving an obvious emotional seam.",
-      },
-      served_by: demoServedBy,
-    }),
-    () => ({
-      verdict: "REAL",
-      p_fake: 0.18,
-      threshold: 0.5,
-      audio_text_emotion: {
-        label: "neutral",
-        confidence: 0.74,
-        distribution: { neutral: 0.74, happy: 0.09, sad: 0.06, angry: 0.04, fear: 0.04, disgust: 0.03 },
-      },
-      visual_emotion: {
-        label: "neutral",
-        confidence: 0.77,
-        distribution: { neutral: 0.77, happy: 0.08, sad: 0.05, angry: 0.04, fear: 0.03, disgust: 0.03 },
-      },
-      emotion_mismatch: { neutral: 0.04, happy: 0.03, sad: 0.02, angry: 0.03, fear: 0.02, disgust: 0.02 },
-      p_sarcasm: 0.09,
-      transcript: "The clip is stable and the emotions line up across modalities.",
-      forensic_interpretation: {
-        state_id: "STATE_REAL_HARMONY",
-        state_tag: "REAL · NATURAL MATCH",
-        headline: "Looks Real: Voice and face emotions match naturally",
-        summary: "Voice tone and facial expression agree on Neutral. What you hear and see align naturally.",
-        voice_face_analysis: "Both voice and face show Neutral (74% / 77%) with no emotional clash.",
-        sarcasm_analysis: "No sarcasm detected (9%). Delivery is sincere and straightforward.",
-        technical_rationale: "Voice and mouth timing are in sync with no signs of AI editing.",
-      },
-      served_by: demoServedBy,
-    }),
-    () => ({
-      verdict: "REAL",
-      p_fake: 0.24,
-      threshold: 0.5,
-      audio_text_emotion: {
-        label: "neutral",
-        confidence: 0.57,
-        distribution: { neutral: 0.57, happy: 0.17, sad: 0.08, angry: 0.06, fear: 0.06, disgust: 0.06 },
-      },
-      visual_emotion: {
-        label: "neutral",
-        confidence: 0.61,
-        distribution: { neutral: 0.61, happy: 0.14, sad: 0.07, angry: 0.06, fear: 0.06, disgust: 0.06 },
-      },
-      emotion_mismatch: { neutral: 0.05, happy: 0.04, sad: 0.03, angry: 0.03, fear: 0.03, disgust: 0.02 },
-      p_sarcasm: 0.81,
-      transcript: "Sure, that was the best surprise ever.",
-      forensic_interpretation: {
-        state_id: "STATE_REAL_DEADPAN_IRONY",
-        state_tag: "REAL · DEADPAN HUMOR",
-        headline: "Looks Real: Deadpan joke (serious face with sarcastic voice)",
-        summary: "The speaker is using sarcasm (81%) with a calm poker face. This is dry deadpan humor, not an AI fake.",
-        voice_face_analysis: "Voice and face stay subdued (57% / 61% Neutral) while delivering an ironic comment.",
-        sarcasm_analysis: "High sarcasm (81%). The model recognized dry humor, avoiding a false deepfake alert.",
-        technical_rationale: "The irony filter accounts for dry humor so intentional poker faces are not flagged as fakes.",
-      },
-      served_by: demoServedBy,
-    }),
-  ];
-
-  function nextDemoResult() {
-    const makeResult = DEMO_RESULTS[demoResultIndex % DEMO_RESULTS.length];
-    demoResultIndex += 1;
-    return makeResult();
-  }
-
-  function routePath(path) {
-    return demoMode ? (path === "/" ? "/demo" : "/demo" + path) : path;
-  }
-
-  function normalizeDemoPath(path) {
-    return path.startsWith("/demo") ? (path.slice(5) || "/") : path;
-  }
 
   // ── Routing ───────────────────────────────────────────────────────────────
   function navigate(path, replace = false) {
@@ -167,11 +50,9 @@
 
   function render() {
     let path = location.pathname;
-    demoMode = path.startsWith("/demo");
-    const logicalPath = normalizeDemoPath(path);
-    let view = ROUTES[logicalPath] || "landing";
-    if (view === "analyzing" && !selectedFile) { view = "upload"; history.replaceState({}, "", routePath("/upload")); }
-    if (view === "results" && !lastResult) { view = "upload"; history.replaceState({}, "", routePath("/upload")); }
+    let view = ROUTES[path] || "landing";
+    if (view === "analyzing" && !selectedFile) { view = "upload"; history.replaceState({}, "", "/upload"); }
+    if (view === "results" && !lastResult) { view = "upload"; history.replaceState({}, "", "/upload"); }
 
     Object.values(views).forEach((v) => v.classList.remove("active"));
     const el = views[view] || views.landing;
@@ -180,9 +61,8 @@
     window.scrollTo({ top: 0 });
 
     document.querySelectorAll(".nav-link").forEach((l) => l.classList.remove("active"));
-    if (logicalPath === "/") document.querySelector('.nav-link[href="/"]')?.classList.add("active");
-    if (logicalPath.startsWith("/about")) document.querySelector(".nav-dropdown-toggle")?.classList.add("active");
-    if (logicalPath === "/benchmarks") document.querySelector('.nav-link[href="/benchmarks"]')?.classList.add("active");
+    if (path === "/") document.querySelector('.nav-link[href="/"]')?.classList.add("active");
+    if (path.startsWith("/about")) document.querySelector(".nav-dropdown-toggle")?.classList.add("active");
 
     document.body.classList.toggle("no-scroll", view === "landing");
     if (view !== "analyzing") stopAnalyzingHUD();
@@ -1552,53 +1432,7 @@
     }, 28);
   }
 
-  // ── Paced Real-time Walkthrough for Demo Mode ───────────────────────────────
-  async function runDemoAnalysis(markStep, setPhase) {
-    lastResult = nextDemoResult();
-    const demoSteps = [
-      { step: 0, phase: "Listening to the voice (16kHz Wav2Vec 2.0)", delay: 1100 },
-      {
-        step: 1,
-        phase: "Reading the tone & words (BERT NLP)",
-        delay: 1500,
-        onEnter: () => streamLiveTranscript(lastResult.transcript),
-      },
-      {
-        step: 2,
-        phase: "Picking the clearest face frames (InsightFace)",
-        delay: 1300,
-      },
-      {
-        step: 3,
-        phase: "Reading the face's emotion (Vision Transformer)",
-        delay: 1400,
-        onEnter: () => { liveVisualEmotion = lastResult.visual_emotion; },
-      },
-      { step: 4, phase: "Comparing voice emotion vs face emotion", delay: 1100 },
-      { step: 5, phase: "Measuring the emotion gap (Δ)", delay: 1100 },
-      { step: 6, phase: "Reaching a verdict", delay: 1100 },
-    ];
 
-    for (const ds of demoSteps) {
-      markStep(ds.step, "active");
-      setPhase(ds.phase);
-      if (ds.onEnter) ds.onEnter();
-      await new Promise((r) => setTimeout(r, ds.delay));
-      markStep(ds.step, "done");
-    }
-
-    targetProgressPct = 100;
-    currentRenderedPct = 100;
-    const elPctDemo = document.getElementById("analyzing-progress-pct");
-    if (elPctDemo) elPctDemo.textContent = "100%";
-    const loaderArcDemo = document.getElementById("loader-arc");
-    if (loaderArcDemo) loaderArcDemo.style.strokeDashoffset = "0";
-
-    await new Promise((r) => setTimeout(r, 700));
-    stopAnalyzingHUD();
-    renderResults(lastResult);
-    navigate(routePath("/results"));
-  }
 
   // ── Diagnostic Error Card for Input Modality / Quality Failures ───────────
   function showDiagnosticError(rawErr) {
@@ -1768,11 +1602,6 @@
       }
     };
 
-    if (demoMode) {
-      await runDemoAnalysis(markStep, setPhase);
-      return;
-    }
-
     try {
       const form = new FormData();
       form.append("file", selectedFile);
@@ -1804,7 +1633,7 @@
         await new Promise((r) => setTimeout(r, 800));
         stopAnalyzingHUD();
         renderResults(lastResult);
-        navigate(routePath("/results"));
+        navigate("/results");
         return;
       }
 
@@ -1880,7 +1709,7 @@
 
       if (lastResult) {
         renderResults(lastResult);
-        navigate(routePath("/results"));
+        navigate("/results");
       } else {
         throw new Error("No result returned from model detection.");
       }
@@ -2495,7 +2324,7 @@
     // Only display when first accessing the page in this session (restart only)
     const hasSeenWarmup = sessionStorage.getItem("ds_warmup_completed");
     const path = location.pathname;
-    const isLanding = path === "/" || path === "/demo" || path === "/demo/";
+    const isLanding = path === "/";
     if (hasSeenWarmup || !isLanding) {
       screenEl.style.display = "none";
       return;

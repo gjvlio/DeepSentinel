@@ -287,50 +287,111 @@ WHISPER_HALLUCINATIONS = [
 ]
 
 
-def sanitize_transcript(transcript: str) -> str:
+def sanitize_transcript(
+    transcript: str,
+    no_speech_prob: float = 0.0,
+    avg_logprob: float = 0.0,
+    compression_ratio: float = 1.0,
+) -> str:
     """
-    Filter out common Whisper hallucination boilerplates and repetitive token loops
-    generated on music, ambient noise, or silence.
+    Filter out common Whisper hallucination boilerplates, repetitive token loops,
+    and high no-speech / low confidence artifacts.
     """
     cleaned = (transcript or "").strip()
     if not cleaned:
         return ""
 
+    # 1. No speech probability check (audio contains only background sound/music)
+    if no_speech_prob > 0.45:
+        log.info(f"Filtered transcript due to high no_speech_prob ({no_speech_prob:.2f}): '{cleaned}'")
+        return ""
+
+    # 2. Low confidence logprob (muffled or noisy non-dialogue audio)
+    if avg_logprob < -1.05:
+        log.info(f"Filtered transcript due to low avg_logprob ({avg_logprob:.2f}): '{cleaned}'")
+        return ""
+
+    # 3. High compression ratio (repetitive sound loops)
+    if compression_ratio > 1.80:
+        log.info(f"Filtered transcript due to high compression_ratio ({compression_ratio:.2f}): '{cleaned}'")
+        return ""
+
     lower = cleaned.lower()
 
-    # 1. Boilerplate substring match
+    # 4. Boilerplate substring match
     for phrase in WHISPER_HALLUCINATIONS:
         if phrase in lower:
-            # If the phrase dominates the transcript (less than 12 other chars), it's a hallucination
             remainder = lower.replace(phrase, "").strip()
             if len(remainder) < 12:
                 log.info(f"Filtered Whisper hallucination boilerplate: '{cleaned}'")
                 return ""
 
-    # 2. Repetitive loop detection (e.g. "you you you you you" or "thank you thank you thank you")
-    words = re.findall(r"\b\w+\b", lower)
+    # 5. Repetitive loop detection (e.g. '1.5g of sugar 1.5g of sugar...' or 'you you you you')
+    words = re.findall(r"\b[a-zA-Z\u00C0-\u00FF0-9'-]+\b", lower)
     if len(words) >= 4:
-        unique_words = set(words)
-        if len(unique_words) <= 2:
-            log.info(f"Filtered Whisper repetitive loop hallucination: '{cleaned}'")
+        alpha_words = [w for w in words if re.search(r"[a-zA-Z\u00C0-\u00FF]", w)]
+        if len(alpha_words) < 2:
+            return ""
+        unique_ratio = len(set(alpha_words)) / len(alpha_words)
+        if unique_ratio < 0.40:
+            log.info(f"Filtered Whisper repetitive loop hallucination (ratio {unique_ratio:.2f}): '{cleaned}'")
             return ""
 
     return cleaned
 
 
-def validate_speech_presence(transcript: str, min_words: int = 1) -> str:
-    """Verify that spoken words were detected by speech recognition, rejecting hallucination loops."""
-    cleaned = sanitize_transcript(transcript)
-    words = cleaned.split()
+def validate_speech_presence(
+    transcript: str,
+    min_words: int = 2,
+    no_speech_prob: float = 0.0,
+    avg_logprob: float = 0.0,
+    compression_ratio: float = 1.0,
+) -> str:
+    """
+    Verify that intelligible human speech / dialogue was detected,
+    rejecting silence, music, background noise, and hallucination loops.
+    """
+    cleaned = sanitize_transcript(
+        transcript,
+        no_speech_prob=no_speech_prob,
+        avg_logprob=avg_logprob,
+        compression_ratio=compression_ratio,
+    )
+    words = re.findall(r"\b[a-zA-Z\u00C0-\u00FF]{2,}\b", cleaned.lower())
 
     if len(words) < min_words:
-        raise InputValidationError(
-            code="ERR_NO_HUMAN_SPEECH",
-            title="No Spoken Words Heard",
-            message="No clear speech was heard in this clip (only silence, background noise, or music).",
-            suggestion="Please pick a section where the person is speaking clearly.",
-            details={"transcript": (transcript or "").strip()},
-        )
+        if no_speech_prob > 0.45:
+            raise InputValidationError(
+                code="ERR_NO_HUMAN_SPEECH",
+                title="No Speaking Voice Heard",
+                message="Only background music, ambient sound, or non-vocal audio was detected.",
+                suggestion="Please upload or select a clip with audible speaking dialogue.",
+                details={"no_speech_prob": no_speech_prob},
+            )
+        elif avg_logprob < -1.05:
+            raise InputValidationError(
+                code="ERR_UNINTELLIGIBLE_SPEECH",
+                title="Audio Is Unintelligible",
+                message="The voice in this video is too muffled, garbled, or noisy to transcribe reliably.",
+                suggestion="Please provide a clip with clearer microphone audio or less background noise.",
+                details={"avg_logprob": avg_logprob},
+            )
+        elif compression_ratio > 1.80:
+            raise InputValidationError(
+                code="ERR_UNINTELLIGIBLE_SPEECH",
+                title="No Clear Dialogue Found",
+                message="Detected repetitive audio rhythm or music without clear human dialogue.",
+                suggestion="Please select a segment with clear verbal conversation.",
+                details={"compression_ratio": compression_ratio},
+            )
+        else:
+            raise InputValidationError(
+                code="ERR_NO_HUMAN_SPEECH",
+                title="No Spoken Dialogue Detected",
+                message="DeepSentinel requires audible, intelligible human speech to evaluate voice-face consistency.",
+                suggestion="Please choose a video segment where the subject is speaking clearly.",
+                details={"transcript": (transcript or "").strip()},
+            )
     return cleaned
 
 
@@ -338,7 +399,7 @@ def validate_face_and_visual_quality(
     frames: List[np.ndarray],
     face_crops: List[np.ndarray],
     scores: List[float],
-    min_face_ratio: float = 0.25,
+    min_face_ratio: float = 0.50,
     min_resolution: int = 60,
     min_sharpness: float = 20.0,
 ) -> None:
@@ -356,7 +417,7 @@ def validate_face_and_visual_quality(
             code="ERR_NO_FACE_DETECTED",
             title="No Face Clearly Visible",
             message=f"A face was visible in only {detection_ratio * 100:.0f}% of the clip (at least {min_face_ratio * 100:.0f}% is required).",
-            suggestion="Ensure the person faces the camera with their face clearly in view.",
+            suggestion="Ensure the person faces the camera with their face clearly in view throughout the clip.",
             details={"detected_frames": valid_face_count, "total_frames": total_frames, "ratio": detection_ratio},
         )
 

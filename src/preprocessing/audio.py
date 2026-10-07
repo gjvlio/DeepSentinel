@@ -178,19 +178,40 @@ def transcribe_with_meta(
     device: str = "cpu",
 ) -> dict:
     """
-    Transcribe WAV file with Whisper without forcing English, returning text and detected language.
+    Transcribe WAV file with Whisper without forcing English, returning text, detected language,
+    and speech intelligibility / confidence metrics.
     """
     try:
+        import numpy as np
         wm = _load_whisper(model_name, device=device)
         use_fp16 = device.startswith("cuda")
         result = wm.transcribe(str(wav_path), fp16=use_fp16, task="transcribe", temperature=0.0)
+        segments = result.get("segments", []) or []
+        
+        nsp_list = [float(s.get("no_speech_prob", 0.0)) for s in segments if "no_speech_prob" in s]
+        alp_list = [float(s.get("avg_logprob", 0.0)) for s in segments if "avg_logprob" in s]
+        cr_list = [float(s.get("compression_ratio", 1.0)) for s in segments if "compression_ratio" in s]
+        
+        mean_nsp = float(np.mean(nsp_list)) if nsp_list else float(result.get("no_speech_prob", 0.0) or 0.0)
+        mean_alp = float(np.mean(alp_list)) if alp_list else float(result.get("avg_logprob", 0.0) or 0.0)
+        max_cr = float(np.max(cr_list)) if cr_list else float(result.get("compression_ratio", 1.0) or 1.0)
+        
         return {
             "text": result.get("text", "").strip(),
             "language": result.get("language", "en"),
+            "no_speech_prob": mean_nsp,
+            "avg_logprob": mean_alp,
+            "compression_ratio": max_cr,
         }
     except Exception as e:
         log.warning(f"Whisper transcription with meta failed for {wav_path}: {e}")
-        return {"text": "", "language": "en"}
+        return {
+            "text": "",
+            "language": "en",
+            "no_speech_prob": 1.0,
+            "avg_logprob": -5.0,
+            "compression_ratio": 1.0,
+        }
 
 
 # ── Linguistic embedding (BERT) ────────────────────────────────────────────────
