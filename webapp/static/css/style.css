@@ -957,14 +957,27 @@ em { font-style: italic; font-family: var(--f-serif); font-weight: 400;
 .verdict-card::before { content: ''; position: absolute; inset: 0; border-radius: var(--r-xl); opacity: .55; transition: background .6s; pointer-events: none; }
 .verdict-card.fake::before { background: radial-gradient(120% 120% at 50% 0%, rgba(219,90,66,.22), transparent 60%); }
 .verdict-card.real::before { background: radial-gradient(120% 120% at 50% 0%, rgba(30,168,150,.22), transparent 60%); }
+.verdict-card.inconclusive::before { background: radial-gradient(120% 120% at 50% 0%, rgba(217,119,6,.22), transparent 60%); }
+.verdict-card.leaning-fake::before { background: radial-gradient(120% 120% at 50% 0%, rgba(234,88,12,.22), transparent 60%); }
+.verdict-card.leaning-real::before { background: radial-gradient(120% 120% at 50% 0%, rgba(13,148,136,.22), transparent 60%); }
 .verdict-tag { position: absolute; top: 22px; right: 24px; font-family: var(--f-mono); font-size: 11.5px; font-weight: 500; padding: 6px 13px; border-radius: 999px; color: #fff; }
 .verdict-card.fake .verdict-tag { background: linear-gradient(135deg,#DB5A42,#e87a64); }
 .verdict-card.real .verdict-tag { background: linear-gradient(135deg,#1EA896,#28c0ad); }
+.verdict-card.inconclusive .verdict-tag { background: linear-gradient(135deg,#D97706,#F59E0B); }
+.verdict-card.leaning-fake .verdict-tag { background: linear-gradient(135deg,#EA580C,#F97316); }
+.verdict-card.leaning-real .verdict-tag { background: linear-gradient(135deg,#0D9488,#14B8A6); }
 .verdict-pct { font-family: var(--f-display); font-size: 80px; font-weight: 600; line-height: 1; letter-spacing: -0.05em; position: relative; }
 .verdict-card.fake .verdict-pct { background: linear-gradient(120deg,#DB5A42,#e87a64); -webkit-background-clip: text; background-clip: text; color: transparent; }
 .verdict-card.real .verdict-pct { background: linear-gradient(120deg,#1EA896,#28c0ad); -webkit-background-clip: text; background-clip: text; color: transparent; }
+.verdict-card.inconclusive .verdict-pct { background: linear-gradient(120deg,#D97706,#F59E0B); -webkit-background-clip: text; background-clip: text; color: transparent; }
+.verdict-card.leaning-fake .verdict-pct { background: linear-gradient(120deg,#EA580C,#F97316); -webkit-background-clip: text; background-clip: text; color: transparent; }
+.verdict-card.leaning-real .verdict-pct { background: linear-gradient(120deg,#0D9488,#14B8A6); -webkit-background-clip: text; background-clip: text; color: transparent; }
 .verdict-label { font-family: var(--f-display); font-size: 20px; font-weight: 600; margin-top: 6px; }
-.verdict-card.fake .verdict-label { color: var(--copper); } .verdict-card.real .verdict-label { color: var(--verdigris); }
+.verdict-card.fake .verdict-label { color: var(--copper); }
+.verdict-card.real .verdict-label { color: var(--verdigris); }
+.verdict-card.inconclusive .verdict-label { color: #D97706; }
+.verdict-card.leaning-fake .verdict-label { color: #EA580C; }
+.verdict-card.leaning-real .verdict-label { color: #0D9488; }
 .verdict-sub { color: var(--gun-soft); margin: 12px auto 0; font-size: 14.5px; max-width: 440px; position: relative; }
 
 /* sarcasm / interpretation card */
@@ -1402,6 +1415,24 @@ body.no-scroll { overflow: hidden; }
   background: rgba(219, 90, 66, 0.12);
   color: var(--copper);
   border: 1px solid rgba(219, 90, 66, 0.32);
+}
+
+.forensic-card.is-inconclusive .forensic-pill-tag {
+  background: rgba(217, 119, 6, 0.12);
+  color: #D97706;
+  border: 1px solid rgba(217, 119, 6, 0.32);
+}
+
+.forensic-card.is-leaning-fake .forensic-pill-tag {
+  background: rgba(234, 88, 12, 0.12);
+  color: #EA580C;
+  border: 1px solid rgba(234, 88, 12, 0.32);
+}
+
+.forensic-card.is-leaning-real .forensic-pill-tag {
+  background: rgba(13, 148, 136, 0.12);
+  color: #0D9488;
+  border: 1px solid rgba(13, 148, 136, 0.32);
 }
 
 .forensic-headline {

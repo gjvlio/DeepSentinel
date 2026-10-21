@@ -76,7 +76,43 @@ DEADPAN_LEXICAL_MARKERS = {
 }
 
 
+
+def compute_jensen_shannon_divergence(
+
+    p_a: torch.Tensor,
+    p_b: torch.Tensor,
+    eps: float = 1e-12,
+) -> float:
+    """
+    Continuous Jensen-Shannon Divergence D_JS(P_A || P_B) (Paper Stage 8):
+        M = 0.5 * (P_A + P_B)
+        D_JS = 0.5 * D_KL(P_A || M) + 0.5 * D_KL(P_B || M)
+    """
+    p_a_safe = (p_a + eps) / (p_a.sum() + eps * p_a.size(-1))
+    p_b_safe = (p_b + eps) / (p_b.sum() + eps * p_b.size(-1))
+    m = 0.5 * (p_a_safe + p_b_safe)
+    kl_a = torch.sum(p_a_safe * torch.log(p_a_safe / m)).item()
+    kl_b = torch.sum(p_b_safe * torch.log(p_b_safe / m)).item()
+    return float(max(0.0, 0.5 * (kl_a + kl_b)))
+
+
+def compute_cosine_synchrony(
+    p_a: torch.Tensor,
+    p_b: torch.Tensor,
+    eps: float = 1e-12,
+) -> float:
+    """
+    Cosine synchrony between multimodal emotion probability vectors:
+        CosSim(P_A, P_B) = (P_A · P_B) / (||P_A||_2 · ||P_B||_2 + ε)
+    """
+    dot = torch.sum(p_a * p_b).item()
+    norm_a = torch.norm(p_a, p=2).item()
+    norm_b = torch.norm(p_b, p=2).item()
+    return float(max(0.0, min(1.0, dot / (norm_a * norm_b + eps))))
+
+
 class ModelService:
+
     def __init__(self):
         self._lock = threading.RLock()
         self.device = settings.device
@@ -433,18 +469,9 @@ class ModelService:
                 p_sarc = min(p_sarc * 0.20, 0.22)
 
             # ── Information-Theoretic Synchrony Engine (D_JS & CosSim) ───
-            eps = 1e-12
-            p_a_safe = (pa + eps) / (pa.sum() + eps * 6)
-            p_b_safe = (pb + eps) / (pb.sum() + eps * 6)
-            m = 0.5 * (p_a_safe + p_b_safe)
-            kl_a = torch.sum(p_a_safe * torch.log(p_a_safe / m)).item()
-            kl_b = torch.sum(p_b_safe * torch.log(p_b_safe / m)).item()
-            d_js = max(0.0, 0.5 * (kl_a + kl_b))
+            d_js = compute_jensen_shannon_divergence(pa, pb)
+            cos_sim = compute_cosine_synchrony(pa, pb)
 
-            dot = torch.sum(pa * pb).item()
-            norm_a = torch.norm(pa, p=2).item()
-            norm_b = torch.norm(pb, p=2).item()
-            cos_sim = max(0.0, min(1.0, dot / (norm_a * norm_b + eps)))
 
             # Valence definitions: 1 (happy), -1 (sad, angry, fear, disgust), 0 (neutral)
             top_a_idx = int(torch.argmax(pa).item())
@@ -631,6 +658,38 @@ class ModelService:
         sarc_pct = int(round(p_sarc * 100))
         fake_pct = int(round(p_fake * 100))
 
+        # ── 5-Point Partition Continuous Confidence Scale (Centered at 50%) ─────
+        is_neutral_tie = fake_pct == 50 and 0.495 <= p_fake <= 0.505
+        if p_fake >= 0.70:
+            tier_prefix = "Deepfake Detected (High Confidence)"
+            tag_conf = "HIGH CONFIDENCE"
+        elif fake_pct > 50:
+            tier_prefix = "Deepfake Detected (Moderate Confidence)"
+            tag_conf = "MODERATE CONFIDENCE"
+        elif is_neutral_tie:
+            tier_prefix = "Inconclusive / Neutral"
+            tag_conf = "INCONCLUSIVE"
+        elif fake_pct > 30:
+            tier_prefix = "Authentic (Moderate Confidence)"
+            tag_conf = "MODERATE CONFIDENCE"
+        else:
+            tier_prefix = "Authentic (High Confidence)"
+            tag_conf = "HIGH CONFIDENCE"
+
+        # Neutral midpoint tie: exact equivocal boundary
+        if is_neutral_tie:
+            rat = "Score (50%) lands precisely on the neutral decision boundary; manual forensic examination required."
+            return ForensicInterpretation(
+                state_id="STATE_INCONCLUSIVE_NEUTRAL",
+                state_tag="INCONCLUSIVE · NEUTRAL TIE",
+                headline="Inconclusive (50%): Equivocal multimodal signals",
+                summary="The multimodal model returned an exact neutral boundary score of 50%. Manual forensic examination is required.",
+                voice_face_analysis=f"Voice conveys {ea_title} while face shows {eb_title}; features are balanced between genuine and synthetic.",
+                sarcasm_analysis=f"Sarcasm probability is {sarc_pct}%.",
+                technical_rationale=rat,
+                forensic_rationale=rat,
+            )
+
         if not is_fake and emotions_match and not sarcastic:
             rat = "Voice and mouth timing are in sync with no signs of AI editing."
             sarc_desc = (
@@ -640,8 +699,8 @@ class ModelService:
             )
             return ForensicInterpretation(
                 state_id="STATE_REAL_HARMONY",
-                state_tag="REAL · NATURAL MATCH",
-                headline="Looks Real: Voice and face emotions match naturally",
+                state_tag=f"REAL ({tag_conf}) · NATURAL MATCH",
+                headline=f"{tier_prefix}: Voice and face emotions match naturally",
                 summary=f"Voice tone and facial expression agree on {ea_title}. What you hear and see align naturally.",
                 voice_face_analysis=f"Both voice and face show {ea_title} with no emotional clash.",
                 sarcasm_analysis=sarc_desc,
@@ -653,8 +712,8 @@ class ModelService:
             rat = "Voice inflection and facial muscles stay synchronized like a real speaker."
             return ForensicInterpretation(
                 state_id="STATE_REAL_CONGRUENT_SARCASM",
-                state_tag="REAL · PLAYFUL SARCASM",
-                headline="Looks Real: Playful sarcasm with matching expression",
+                state_tag=f"REAL ({tag_conf}) · PLAYFUL SARCASM",
+                headline=f"{tier_prefix}: Playful sarcasm with matching expression",
                 summary=f"The speaker is using playful sarcasm ({sarc_pct}%), and their facial expression matches that tone.",
                 voice_face_analysis=f"Voice and face both express {ea_title} together in a coordinated delivery.",
                 sarcasm_analysis=f"Playful sarcasm detected ({sarc_pct}%). DeepSentinel recognized intentional humor rather than an AI error.",
@@ -666,8 +725,8 @@ class ModelService:
             rat = "The irony filter accounts for dry humor so intentional poker faces are not flagged as fakes."
             return ForensicInterpretation(
                 state_id="STATE_REAL_DEADPAN_IRONY",
-                state_tag="REAL · DEADPAN HUMOR",
-                headline="Looks Real: Deadpan joke (serious face with sarcastic voice)",
+                state_tag=f"REAL ({tag_conf}) · DEADPAN HUMOR",
+                headline=f"{tier_prefix}: Deadpan joke (serious face with sarcastic voice)",
                 summary=f"Voice sounds {ea_title} while the face stays {eb_title}, but this is dry deadpan humor ({sarc_pct}% sarcasm), not an AI fake.",
                 voice_face_analysis=f"Voice sounds {ea_title} while the face keeps a {eb_title} poker face.",
                 sarcasm_analysis=f"Deadpan delivery detected ({sarc_pct}%). DeepSentinel recognized intentional dry humor rather than an AI mismatch.",
@@ -684,8 +743,8 @@ class ModelService:
             )
             return ForensicInterpretation(
                 state_id="STATE_REAL_MIXED_EMOTION",
-                state_tag="REAL · MIXED FEELINGS",
-                headline="Looks Real: Normal mixed human feelings",
+                state_tag=f"REAL ({tag_conf}) · MIXED FEELINGS",
+                headline=f"{tier_prefix}: Normal mixed human feelings",
                 summary=f"Voice leans {ea_title} while the face shows {eb_title}. This subtle emotional mix is normal in authentic conversation.",
                 voice_face_analysis=f"Voice conveys {ea_title} while face shows {eb_title}, transitioning smoothly.",
                 sarcasm_analysis=sarc_desc,
@@ -697,8 +756,8 @@ class ModelService:
             rat = "Deepfake tools usually replace voice or face separately, leaving an obvious emotional seam."
             return ForensicInterpretation(
                 state_id="STATE_FAKE_EMOTION_DESYNC",
-                state_tag="FAKE · EMOTION CLASH",
-                headline="Likely Deepfake: Voice and face emotions contradict each other",
+                state_tag=f"FAKE ({tag_conf}) · EMOTION CLASH",
+                headline=f"{tier_prefix}: Voice and face emotions contradict each other",
                 summary=f"Voice sounds {ea_title}, but the face looks {eb_title}. This sharp contradiction happens when voice or video is swapped.",
                 voice_face_analysis=f"Sharp contradiction: Hearing {ea_title} while seeing {eb_title} does not happen in sincere human speech.",
                 sarcasm_analysis=f"Sarcasm is low ({sarc_pct}%), confirming this clash is an AI flaw, not a joke.",
@@ -710,8 +769,8 @@ class ModelService:
             rat = f"High fake probability ({fake_pct}%). Natural facial micro-expressions are missing."
             return ForensicInterpretation(
                 state_id="STATE_FAKE_MANIPULATED_DISSONANCE",
-                state_tag="FAKE · VOICE & FACE CLASH",
-                headline="Likely Deepfake: Sarcastic speech pasted onto an incompatible face",
+                state_tag=f"FAKE ({tag_conf}) · VOICE & FACE CLASH",
+                headline=f"{tier_prefix}: Sarcastic speech pasted onto an incompatible face",
                 summary=f"The audio has sarcastic tone ({sarc_pct}%), but the face stays {eb_title} and fails to react naturally.",
                 voice_face_analysis=f"The tone ({ea_title}) clashes with the stiff or unreactive facial expression ({eb_title}).",
                 sarcasm_analysis=f"Sarcastic speech ({sarc_pct}%) without matching facial cues shows pasted audio.",
@@ -723,8 +782,8 @@ class ModelService:
             rat = f"Detected AI generation artifacts ({fake_pct}% fake score) such as blurring or lip-sync lag."
             return ForensicInterpretation(
                 state_id="STATE_FAKE_SYNTHESIS_ARTIFACTS",
-                state_tag="FAKE · AI GLITCHES DETECTED",
-                headline="Likely Deepfake: Matching emotion, but digital AI glitches detected",
+                state_tag=f"FAKE ({tag_conf}) · AI GLITCHES DETECTED",
+                headline=f"{tier_prefix}: Matching emotion, but digital AI glitches detected",
                 summary=f"Even though voice and face show {ea_title}, the AI found digital glitches in how the face was generated.",
                 voice_face_analysis=f"Both voice and face show {ea_title}, but facial movements look artificially generated.",
                 sarcasm_analysis=f"Low sarcasm ({sarc_pct}%). The speech is delivered straight.",
@@ -736,8 +795,8 @@ class ModelService:
             rat = f"Detected artificial boundary warping ({fake_pct}% fake score), confirming AI manipulation."
             return ForensicInterpretation(
                 state_id="STATE_FAKE_SYNTHETIC_SMIRK",
-                state_tag="FAKE · ARTIFICIAL WARPING",
-                headline="Likely Deepfake: Unnatural artificial expressions and mouth warping",
+                state_tag=f"FAKE ({tag_conf}) · ARTIFICIAL WARPING",
+                headline=f"{tier_prefix}: Unnatural artificial expressions and mouth warping",
                 summary=f"The video mimics an expressive or sarcastic look ({sarc_pct}%), but facial movements appear artificially warped.",
                 voice_face_analysis=f"Voice and face attempt {ea_title}, but mouth movement looks robotic or unnatural.",
                 sarcasm_analysis=f"High sarcasm score ({sarc_pct}%), typical of exaggerated parody deepfakes.",

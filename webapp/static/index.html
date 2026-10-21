@@ -456,7 +456,18 @@
               <svg viewBox="0 0 16 16" fill="none"><circle cx="8" cy="4.4" r="1" fill="currentColor"/><rect x="7.2" y="6.8" width="1.6" height="5.4" rx=".8" fill="currentColor"/></svg>
             </button>
           </div>
-          <div class="guide-note" id="g-verdict"><div><p>Chance that this video is an <b>AI deepfake</b>. 50% or more means likely fake; under 50% means authentic.</p></div></div>
+          <div class="guide-note" id="g-verdict">
+            <div>
+              <p><b>DeepSentinel 5-Point Continuous Confidence Scale:</b> Calibrated around a 50% decision midpoint, predictions are partitioned into five forensic confidence tiers:</p>
+              <ul style="margin: 6px 0 6px 18px; padding: 0; line-height: 1.5; font-size: 13px;">
+                <li><b>0% – 30%:</b> <i>High Confidence Authentic</i> (natural biometric harmony)</li>
+                <li><b>31% – 49%:</b> <i>Moderately Confident Authentic</i> (leans genuine; natural human variation)</li>
+                <li><b>50%:</b> <i>Inconclusive / Neutral</i> (exact midpoint tie; manual examination required)</li>
+                <li><b>51% – 69%:</b> <i>Moderately Confident Deepfake</i> (detectable synthetic cues / cross-modal tension)</li>
+                <li><b>70% – 100%:</b> <i>High Confidence Deepfake</i> (pronounced artificial synthesis signatures)</li>
+              </ul>
+            </div>
+          </div>
         </div>
 
         <!-- Forensic Multi-Tier Interpretation Card -->

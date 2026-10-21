@@ -1855,26 +1855,56 @@
     const pFake = r.p_fake ?? 0;
     const pct = Math.round(pFake * 100);
     const card = document.getElementById("verdict-card");
-    card.classList.toggle("fake", isFake);
-    card.classList.toggle("real", !isFake);
-    document.getElementById("verdict-tag").textContent = isFake ? "High Risk" : "Low Risk";
-    document.getElementById("verdict-label").textContent = isFake
-      ? "Deepfake Risk · Likely deepfake"
-      : "Deepfake Risk · Likely authentic";
 
     const emoA = (r.audio_text_emotion?.label || "").toLowerCase();
     const emoB = (r.visual_emotion?.label || "").toLowerCase();
     const emotionsMatch = Boolean(emoA && emoB && emoA === emoB);
 
-    if (isFake) {
-      document.getElementById("verdict-sub").textContent = emotionsMatch
-        ? "The face or voice shows signs of AI editing even though the general feelings seem similar."
-        : "The feelings in the voice and the face contradict each other.";
+    // ── 5-Point Partition Continuous Confidence Scale (Centered at 50%) ─────
+    let tierTag = "";
+    let tierLabel = "";
+    let tierSub = "";
+
+    card.classList.remove("fake", "real", "inconclusive");
+
+    if (pFake <= 0.30) {
+      card.classList.add("real");
+      tierTag = "High Confidence Real";
+      tierLabel = "Classification · High Confidence Authentic";
+      tierSub = emotionsMatch
+        ? "The voice and facial expressions match with natural biometric harmony."
+        : "The voice and face show normal, natural human variation with authentic cues.";
+    } else if (pct < 50) {
+      card.classList.add("real");
+      tierTag = "Moderate Real";
+      tierLabel = "Classification · Moderately Confident Authentic";
+      tierSub = emotionsMatch
+        ? "The voice and facial expressions align naturally, consistent with genuine speech."
+        : "The voice and face show subtle mixed feelings common in authentic human conversation.";
+    } else if (pct === 50 && pFake >= 0.495 && pFake <= 0.505) {
+      card.classList.add("inconclusive");
+      tierTag = "Inconclusive";
+      tierLabel = "Classification · Inconclusive / Neutral";
+      tierSub = "Exact 50% midpoint tie. Multimodal evidence is indeterminate — manual forensic examination required.";
+    } else if (pFake < 0.70) {
+      card.classList.add("fake");
+      tierTag = "Moderate Fake";
+      tierLabel = "Classification · Moderately Confident Deepfake";
+      tierSub = emotionsMatch
+        ? "AI manipulation traces detected in face or audio despite matching general sentiment."
+        : "The feelings in the voice and the face show notable contradictions.";
     } else {
-      document.getElementById("verdict-sub").textContent = emotionsMatch
-        ? "The voice and facial expressions match naturally."
-        : "The voice and face show normal, natural human variation.";
+      card.classList.add("fake");
+      tierTag = "High Confidence Fake";
+      tierLabel = "Classification · High Confidence Deepfake";
+      tierSub = emotionsMatch
+        ? "Pronounced digital synthesis artifacts and unnatural facial boundary warping detected."
+        : "Severe contradiction between voice and face emotions confirms synthetic manipulation.";
     }
+
+    document.getElementById("verdict-tag").textContent = tierTag;
+    document.getElementById("verdict-label").textContent = tierLabel;
+    document.getElementById("verdict-sub").textContent = tierSub;
     countUp(document.getElementById("verdict-pct"), pct);
 
     // BERT / Whisper Spoken Transcript
@@ -1888,20 +1918,24 @@
     const pSarc = r.p_sarcasm ?? 0;
     const sarcastic = pSarc >= 0.5;
     const sarcPct = Math.round(pSarc * 100);
-    const auth = isFake ? "<b>manipulated</b>" : "<b class='ok'>genuine</b>";
+    const isTie = pct === 50 && pFake >= 0.495 && pFake <= 0.505;
+    const auth = (pct > 50) ? "<b>manipulated</b>" : (isTie ? "<b>indeterminate</b>" : "<b class='ok'>genuine</b>");
+
     let sentence;
-    if (!isFake && !sarcastic) {
-      sentence = emotionsMatch
-        ? `This clip looks ${auth} and sincere — the speaker's voice and face agree.`
-        : `This clip looks ${auth} — the emotions show natural, authentic human variation.`;
-    } else if (!isFake && sarcastic) {
-      sentence = `This clip looks ${auth}, but it is delivered <b>sarcastically</b> (meant as a joke or dry wit).`;
-    } else if (isFake && !sarcastic) {
+    if (isTie) {
+      sentence = `This clip lands exactly on the <b>inconclusive threshold</b> (50%). Multimodal evidence is indeterminate, so expert examination is required.`;
+    } else if (pct > 50 && !sarcastic) {
       sentence = emotionsMatch
         ? `This clip looks ${auth} — AI editing flaws detected around the face or voice.`
         : `This clip looks ${auth} — the feelings in the voice and on the face clash.`;
+    } else if (pct > 50 && sarcastic) {
+      sentence = `This clip looks ${auth}, with clashing emotions and synthetic speech patterns.`;
+    } else if (pct < 50 && !sarcastic) {
+      sentence = emotionsMatch
+        ? `This clip looks ${auth} and sincere — the speaker's voice and face agree.`
+        : `This clip looks ${auth} — the emotions show natural, authentic human variation.`;
     } else {
-      sentence = `This clip looks ${auth}, with clashing emotions and robotic speech patterns.`;
+      sentence = `This clip looks ${auth}, but it is delivered <b>sarcastically</b> (meant as a joke or dry wit).`;
     }
     const interpretEl = document.getElementById("interpret");
     if (interpretEl) interpretEl.innerHTML = sentence;
@@ -1944,9 +1978,9 @@
     const fiCard = document.getElementById("forensic-interpretation-card");
     const fi = r.forensic_interpretation;
     if (fiCard && fi) {
-      fiCard.hidden = false;
-      fiCard.classList.toggle("is-fake", isFake);
-      fiCard.classList.toggle("is-real", !isFake);
+      fiCard.classList.toggle("is-fake", pct > 50);
+      fiCard.classList.toggle("is-real", pct < 50);
+      fiCard.classList.toggle("is-inconclusive", isTie);
 
       const stateTagEl = document.getElementById("forensic-state-tag");
       const headlineEl = document.getElementById("forensic-headline");
@@ -1955,7 +1989,13 @@
       const sarcEl = document.getElementById("forensic-sarcasm");
       const ratEl = document.getElementById("forensic-rationale");
 
-      if (stateTagEl) stateTagEl.textContent = fi.state_tag ? fi.state_tag : (isFake ? "LIKELY DEEPFAKE" : "LIKELY AUTHENTIC");
+      const defaultStateTag = pFake >= 0.70 ? "HIGH CONFIDENCE DEEPFAKE" :
+                              pct > 50 ? "MODERATE CONFIDENCE DEEPFAKE" :
+                              isTie ? "INCONCLUSIVE · NEUTRAL TIE" :
+                              pct > 30 ? "MODERATE CONFIDENCE AUTHENTIC" :
+                              "HIGH CONFIDENCE AUTHENTIC";
+
+      if (stateTagEl) stateTagEl.textContent = fi.state_tag ? fi.state_tag : defaultStateTag;
       if (headlineEl) headlineEl.textContent = fi.headline || "Analysis Complete";
       if (summaryEl) summaryEl.textContent = fi.summary || "";
       if (vfEl) vfEl.textContent = fi.voice_face_analysis || "Voice and face expressions evaluated.";
