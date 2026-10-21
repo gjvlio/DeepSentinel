@@ -28,7 +28,107 @@ from .classifier import ClassifierMLP
 from .sarcasm_head import SarcasmHead
 
 
+def compute_emotion_probabilities(logits: torch.Tensor, dim: int = -1) -> torch.Tensor:
+    """
+    Emotion Softmax probability distribution:
+        P_k = exp(z_k - max(z)) / sum_{j=1}^C exp(z_j - max(z))
+
+    Maps raw emotion logits to a valid categorical probability simplex P ∈ Δ^{C-1}.
+    """
+    max_val = torch.max(logits, dim=dim, keepdim=True).values
+    exp_shifted = torch.exp(logits - max_val)
+    return exp_shifted / torch.sum(exp_shifted, dim=dim, keepdim=True)
+
+
+# Backwards-compatible alias
+compute_softmax = compute_emotion_probabilities
+
+
+def compute_detection_probability(logits: torch.Tensor) -> torch.Tensor:
+    """
+    Standard logistic sigmoid function:
+        P(fake) = σ(z) = 1 / (1 + exp(-z))
+
+    Maps unbounded detection logit z ∈ (-∞, +∞) to calibrated probability P ∈ (0, 1).
+    """
+    return 1.0 / (1.0 + torch.exp(-logits))
+
+
+# Backwards-compatible alias
+compute_sigmoid = compute_detection_probability
+
+
+def compute_emotion_discrepancy(prob_a: torch.Tensor, prob_b: torch.Tensor) -> torch.Tensor:
+    """
+    Cross-modal emotion discrepancy vector (Paper Section 3, Stage 4):
+        Δ_k = |P_{A, k} - P_{B, k}|,   k ∈ {1, ..., 6}
+
+    Measures the absolute affective divergence between acoustic prosody (P_A)
+    and visual facial Action Unit expression (P_B).
+    """
+    return torch.abs(prob_a - prob_b)
+
+
+def compute_discrepancy_magnitude(delta: torch.Tensor) -> torch.Tensor:
+    """
+    Euclidean norm of the cross-modal discrepancy vector:
+        ||Δ||_2 = sqrt( ∑_{k=1}^6 Δ_k^2 )
+    """
+    return torch.sqrt(torch.sum(delta ** 2, dim=-1))
+
+
+def compute_affect_cooccurrence_matrix(prob_a: torch.Tensor, prob_b: torch.Tensor) -> torch.Tensor:
+    """
+    Affective joint co-occurrence outer product matrix (Paper Section 3, Stage 4):
+        M_emo = P_A ⊗ P_B = P_A P_B^T ∈ R^{6 × 6}
+        fused_emo = vec(M_emo) ∈ R^{36}
+
+    Encodes fine-grained cross-modal emotional pairs (e.g., Happy face + Angry voice)
+    which distinguishes specific deceptive configurations.
+    """
+    outer = torch.bmm(prob_a.unsqueeze(2), prob_b.unsqueeze(1))  # (B, 6, 6)
+    return outer.view(prob_a.size(0), 36)                        # (B, 36)
+
+
+def compute_bottleneck_projection(
+    fused_cbp: torch.Tensor,
+    proj_layer: nn.Linear,
+    norm_layer: nn.LayerNorm,
+) -> torch.Tensor:
+    """
+    Sub-symbolic CBP bottleneck projection (Paper Section 3, Stage 5):
+        fused_proj = GELU(LayerNorm(W_proj · fused_CBP + b_proj)) ∈ R^{256}
+
+    Compresses 8,192D sketch space into 256 dimensions to prevent dimensional
+    asymmetry and gradient domination over affective features.
+    """
+    return F.gelu(norm_layer(proj_layer(fused_cbp)))
+
+
+def assemble_hybrid_299d_feature(
+    fused_proj: torch.Tensor,
+    fused_emo: torch.Tensor,
+    delta: torch.Tensor,
+    sarcasm: torch.Tensor,
+) -> torch.Tensor:
+    """
+    Assembly of the Multi-Scale Hybrid Bottleneck vector (Paper Section 3, Stage 5):
+        x_299 = [ fused_proj (256D) || fused_emo (36D) || Δ (6D) || P_sarc (1D) ] ∈ R^{299}
+    """
+    return torch.cat([fused_proj, fused_emo, delta, sarcasm], dim=-1)
+
+
+
 class GradientReversalFunction(torch.autograd.Function):
+    """
+    Gradient Reversal Layer (GRL) for Domain-Adversarial Training (DANN; Ganin & Lempitsky, 2015).
+
+    Mathematical Formulation:
+        Forward pass (Identity operator):
+            R_α(x) = x
+        Backward pass (Gradient negation with dynamic schedule α):
+            dL / dx = -α * (dL / dy)
+    """
     @staticmethod
     def forward(ctx, x: torch.Tensor, alpha: float) -> torch.Tensor:
         ctx.alpha = alpha
@@ -43,8 +143,8 @@ class GradientReversalFunction(torch.autograd.Function):
 class GradientReversalLayer(nn.Module):
     """
     Gradient Reversal Layer (GRL) for Domain-Adversarial Training (DANN).
-    Forward pass: Identity mapping.
-    Backward pass: Multiplies gradients by -alpha.
+    Forward pass: Identity mapping R_α(x) = x.
+    Backward pass: Multiplies gradients by -alpha to encourage domain-invariant representations.
     """
     def __init__(self, alpha: float = 1.0):
         super().__init__()
@@ -53,6 +153,7 @@ class GradientReversalLayer(nn.Module):
     def forward(self, x: torch.Tensor, alpha: float | None = None) -> torch.Tensor:
         a = alpha if alpha is not None else self.alpha
         return GradientReversalFunction.apply(x, a)
+
 
 
 @dataclass
@@ -242,40 +343,63 @@ class DeepfakeDetector(nn.Module):
         z_at_emo: Optional[torch.Tensor] = None,
         has_speech: bool = True,
     ) -> DetectorOutput:
-        """Shared logic after feature extraction."""
+        """
+        Shared detection logic after feature extraction.
+
+        Mathematical Formulations (Paper Section 3):
+        1. Modality Emotion Distributions:
+               P_A = Softmax(EmotionHeadA(Z_at)) ∈ Δ^5
+               P_B = Softmax(EmotionHeadB(Z_v))  ∈ Δ^5
+        2. Cross-Modal Emotion Discrepancy Vector:
+               Δ_k = |P_{A, k} - P_{B, k}|,   k ∈ {1, ..., 6}
+        3. Joint Affect Co-occurrence State:
+               fused_emo = vec(P_A ⊗ P_B) = vec(P_A P_B^T) ∈ R^{36}
+        4. Compact Bilinear Bottleneck Projection:
+               fused_proj = GELU(LayerNorm(W_proj · fused_CBP)) ∈ R^{256}
+        5. 299D Hybrid Classifier Representation:
+               x_299 = [fused_proj (256D) || fused_emo (36D) || Δ (6D) || P_sarc (1D)] ∈ R^{299}
+        6. Detection Prediction:
+               logit = ClassifierMLP(x_299) ∈ R^1
+        """
         emo_source = z_at_emo if z_at_emo is not None else z_at
-        emo_a = self.emotion_head_a(emo_source)  # (B, 6)
-        emo_b = self.emotion_head_b(z_v)   # (B, 6)
-        sarc  = self.sarcasm_head(z_at)    # (B, 1)
+        emo_a = self.emotion_head_a(emo_source)  # (B, 6) raw audio emotion logits
+        emo_b = self.emotion_head_b(z_v)         # (B, 6) raw visual emotion logits
+        sarc  = self.sarcasm_head(z_at)          # (B, 1) raw sarcasm logit
 
-        fused = self.bilinear_fusion(z_at, z_v)  # (B, 8192)
+        fused = self.bilinear_fusion(z_at, z_v)  # (B, 8192) L2-normalized CBP feature
 
-        prob_b = F.softmax(emo_b, dim=-1)
+        # Step 1: Modality emotion probability distributions: P_k = exp(z_k) / sum_j exp(z_j)
+        prob_b = compute_emotion_probabilities(emo_b, dim=-1)
         if not has_speech:
             B = z_at.size(0)
-            # When speech is absent (silent/quiet video), vocal emotion is neutral, sarcasm is 0,
-            # and there is no voice-face incongruence (delta=0)
+            # When speech is absent (silent/quiet video), vocal emotion is 100% neutral,
+            # sarcasm is 0, and cross-modal incongruence Δ = 0.
             prob_a = torch.zeros(B, 6, device=z_at.device)
             prob_a[:, 0] = 1.0  # 100% neutral voice
             sarc = torch.zeros(B, 1, device=z_at.device)
             delta = torch.zeros(B, 6, device=z_at.device)
         else:
-            prob_a = F.softmax(emo_a, dim=-1)
-            delta = torch.abs(prob_a - prob_b)  # (B, 6)
+            prob_a = compute_emotion_probabilities(emo_a, dim=-1)
+            # Step 2: Cross-Modal Emotion Discrepancy Vector: Δ = |P_A - P_B| ∈ [0, 1]^6
+            delta = compute_emotion_discrepancy(prob_a, prob_b)
 
         if self.classifier_mode == "mismatch_only":
+            # Ablation mode: classify strictly on discrepancy Δ and sarcasm score
             combined = torch.cat([delta, sarc], dim=-1)
             domain_in = combined
         elif self.classifier_mode == "emotion_bilinear":
-            outer = torch.bmm(prob_a.unsqueeze(2), prob_b.unsqueeze(1))  # (B, 6, 6)
-            fused_emo = outer.view(prob_a.size(0), 36)                   # (B, 36)
-            combined = torch.cat([fused_emo, delta, sarc], dim=-1)       # (B, 43)
+            # Outer product state: M_emo = P_A ⊗ P_B ∈ R^{6 × 6} → vec(M) ∈ R^{36}
+            fused_emo = compute_affect_cooccurrence_matrix(prob_a, prob_b)
+            combined = torch.cat([fused_emo, delta, sarc], dim=-1)
             domain_in = combined
         elif self.classifier_mode == "bottleneck":
-            outer = torch.bmm(prob_a.unsqueeze(2), prob_b.unsqueeze(1))  # (B, 6, 6)
-            fused_emo = outer.view(prob_a.size(0), 36)                   # (B, 36)
-            fused_proj = F.gelu(self.proj_ln(self.bilinear_proj(fused))) # (B, 256)
-            combined = torch.cat([fused_proj, fused_emo, delta, sarc], dim=-1) # (B, 299)
+            # Stage 5 Master Model (299D Hybrid Architecture):
+            # 1. Affective Co-Occurrence Matrix: vec(P_A ⊗ P_B) ∈ R^{36}
+            fused_emo = compute_affect_cooccurrence_matrix(prob_a, prob_b)
+            # 2. Sub-symbolic CBP bottleneck: fused_proj = GELU(LayerNorm(W_proj * fused)) ∈ R^{256}
+            fused_proj = compute_bottleneck_projection(fused, self.bilinear_proj, self.proj_ln)
+            # 3. 299D Hybrid concatenation: x_299 = [fused_proj || fused_emo || delta || sarc] ∈ R^{299}
+            combined = assemble_hybrid_299d_feature(fused_proj, fused_emo, delta, sarc)
             domain_in = fused_proj
         elif self.classifier_mode == "high_dropout":
             fused_drop = self.high_dropout(fused)
@@ -285,9 +409,11 @@ class DeepfakeDetector(nn.Module):
             combined = torch.cat([fused, delta, sarc], dim=-1)
             domain_in = fused
 
-        logit = self.classifier(combined)                    # (B, 1)
+        # Final classification MLP: logit ∈ R^1
+        logit = self.classifier(combined)
 
-        # Domain adversarial classifier through GRL
+
+        # Domain adversarial classifier through Gradient Reversal Layer (DANN GRL)
         rev_feat = self.grl(domain_in, alpha=grl_alpha)
         domain_logits = self.domain_classifier(rev_feat)      # (B, 5)
 
@@ -518,5 +644,76 @@ class DeepfakeDetector(nn.Module):
 
     @staticmethod
     def p_fake(logit: torch.Tensor) -> torch.Tensor:
-        """Convert raw logit → P(fake) ∈ [0, 1]."""
-        return torch.sigmoid(logit)
+        """
+        Convert raw logit → P(fake) ∈ [0, 1] via first-principles logistic sigmoid:
+            P(fake) = 1 / (1 + exp(-logit))
+        """
+        return compute_sigmoid(logit)
+
+
+if __name__ == "__main__":
+    print("\n" + "=" * 75)
+    print("   DEEPSENTINEL MULTIMODAL BOTTLENECK & 299D FEATURE ASSEMBLY")
+    print("=" * 75)
+    print("Architecture: Audio-Text + Visual CBP + Affective Incongruence Bottleneck\n")
+
+    torch.manual_seed(42)
+    B = 2
+    d_at = 1536
+    d_v = 768
+
+    model = DeepfakeDetector(classifier_mode="bottleneck")
+    model.eval()
+
+    z_at = torch.randn(B, d_at)
+    z_v = torch.randn(B, d_v)
+
+    with torch.no_grad():
+        # Step 1: Forward heads
+        emo_a = model.emotion_head_a(z_at)
+        emo_b = model.emotion_head_b(z_v)
+        sarc = model.sarcasm_head(z_at)
+
+        prob_a = compute_emotion_probabilities(emo_a)
+        prob_b = compute_emotion_probabilities(emo_b)
+
+        print("[STEP 1] EMOTION PROBABILITY DISTRIBUTIONS (SOFTMAX P in Delta^5):")
+        print(f"  P_A (Acoustic-Text) : {prob_a[0].numpy().round(4)} | Sum: {prob_a[0].sum().item():.6f}")
+        print(f"  P_V (Visual Face)   : {prob_b[0].numpy().round(4)} | Sum: {prob_b[0].sum().item():.6f}\n")
+
+        # Step 2: Discrepancy Vector and Norm
+        delta = compute_emotion_discrepancy(prob_a, prob_b)
+        delta_norm = compute_discrepancy_magnitude(delta)
+        print("[STEP 2] AFFECTIVE INCONGRUENCE FORMULA DERIVATIONS:")
+        print(f"  Delta = |P_A - P_V| : {delta[0].numpy().round(4)} in R^6")
+        print(f"  ||Delta||_2 norm    : {delta_norm[0].item():.6f} = sqrt(sum Delta_k^2)\n")
+
+        # Step 3: Affect Co-occurrence Outer Product
+        fused_emo = compute_affect_cooccurrence_matrix(prob_a, prob_b)
+        print("[STEP 3] AFFECT CO-OCCURRENCE KRONECKER OUTER PRODUCT:")
+        print(f"  fused_emo = vec(P_A (x) P_V) : shape {tuple(fused_emo.shape)} in R^36")
+        print(f"  Vector sum                   : {fused_emo[0].sum().item():.6f} (= 1.000000)\n")
+
+        # Step 4: CBP and Bottleneck Projection
+        fused_cbp = model.bilinear_fusion(z_at, z_v)
+        fused_proj = compute_bottleneck_projection(fused_cbp, model.bilinear_proj, model.proj_ln)
+        print("[STEP 4] CBP & BOTTLENECK PROJECTION:")
+        print(f"  fused_cbp  : shape {tuple(fused_cbp.shape)} in R^8192 (Unit L2-norm)")
+        print(f"  fused_proj : shape {tuple(fused_proj.shape)} in R^256 (GELU + LayerNorm)\n")
+
+        # Step 5: Assembly of 299D Hybrid Representation
+        x_299 = assemble_hybrid_299d_feature(fused_proj, fused_emo, delta, sarc)
+        print("[STEP 5] 299D HYBRID FEATURE VECTOR ASSEMBLY (PAPER SECTION 3.4):")
+        print(f"  Formula: x_299 = [ fused_proj (256) || fused_emo (36) || Delta (6) || sarc (1) ]")
+        print(f"  Assembly: 256 + 36 + 6 + 1 = {256 + 36 + 6 + 1} dimensions")
+        print(f"  Resulting Tensor Shape     : {tuple(x_299.shape)}\n")
+
+        # Step 6: Classification and Sigmoid Probability
+        out = model._detect(z_at, z_v)
+        prob_fake = compute_detection_probability(out.logit)
+        print("[STEP 6] RAW LOGIT & FIRST-PRINCIPLES SIGMOID DETECTION:")
+        for i in range(B):
+            print(f"  Sample {i+1}: Logit = {out.logit[i].item():+.4f} --> P(fake) = 1/(1 + exp(-z)) = {prob_fake[i].item():.6f} ({prob_fake[i].item()*100:.2f}%)")
+    print("=" * 75 + "\n")
+
+

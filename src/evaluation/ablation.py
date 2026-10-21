@@ -16,7 +16,13 @@ import torch.nn as nn
 import torch.nn.functional as F
 from torch.utils.data import DataLoader
 
-from src.models.detection_model import DeepfakeDetector, DetectorOutput
+from src.models.detection_model import (
+    DeepfakeDetector,
+    DetectorOutput,
+    compute_emotion_probabilities,
+    compute_emotion_discrepancy,
+    compute_discrepancy_magnitude,
+)
 from src.evaluation.metrics import DetectionMetrics, EvalResults
 
 log = logging.getLogger(__name__)
@@ -25,15 +31,27 @@ log = logging.getLogger(__name__)
 class DeepfakeDetectorNoDelta(DeepfakeDetector):
     """Identical to DeepfakeDetector but Δ is replaced with zeros."""
 
-    def _detect(self, z_at: torch.Tensor, z_v: torch.Tensor) -> DetectorOutput:
-        emo_a  = self.emotion_head_a(z_at)
-        emo_b  = self.emotion_head_b(z_v)
-        fused  = self.bilinear_fusion(z_at, z_v)
-        # Replace delta with zeros — isolates whether delta contributes
-        delta  = torch.zeros(z_at.size(0), 6, device=z_at.device)
-        combined = torch.cat([fused, delta], dim=-1)
-        logit    = self.classifier(combined)
-        return DetectorOutput(logit=logit, emotion_a=emo_a, emotion_b=emo_b)
+    def _detect(self, z_at: torch.Tensor, z_v: torch.Tensor, *args, **kwargs) -> DetectorOutput:
+        emo_a = self.emotion_head_a(z_at)
+        emo_b = self.emotion_head_b(z_v)
+        sarc  = self.sarcasm_head(z_at)
+        fused = self.bilinear_fusion(z_at, z_v)
+
+        # In ablation, Δ pathway is ablated (zeroed out)
+        delta = torch.zeros(z_at.size(0), 6, device=z_at.device)
+
+        if self.classifier_mode == "bottleneck":
+            prob_a = compute_emotion_probabilities(emo_a, dim=-1)
+            prob_b = compute_emotion_probabilities(emo_b, dim=-1)
+            outer = torch.bmm(prob_a.unsqueeze(2), prob_b.unsqueeze(1))
+            fused_emo = outer.view(prob_a.size(0), 36)
+            fused_proj = F.gelu(self.proj_ln(self.bilinear_proj(fused)))
+            combined = torch.cat([fused_proj, fused_emo, delta, sarc], dim=-1)
+        else:
+            combined = torch.cat([fused, delta, sarc], dim=-1)
+
+        logit = self.classifier(combined)
+        return DetectorOutput(logit=logit, emotion_a=emo_a, emotion_b=emo_b, sarcasm=sarc)
 
 
 class AblationEvaluator:
@@ -54,16 +72,22 @@ class AblationEvaluator:
             out  = model.forward_from_features(z_at, z_v)
             logits.append(out.logit.cpu())
             labels.append(batch["fake_label"])
-            d = torch.abs(
-                F.softmax(out.emotion_a.cpu(), dim=-1) -
-                F.softmax(out.emotion_b.cpu(), dim=-1)
-            ).norm(dim=-1)
+
+            # Affective probability simplex distributions: P_A, P_B ∈ Δ^5
+            pa = compute_emotion_probabilities(out.emotion_a.cpu(), dim=-1)
+            pb = compute_emotion_probabilities(out.emotion_b.cpu(), dim=-1)
+            # Emotion Incongruence Vector: Δ_k = |P_{A, k} - P_{B, k}|
+            delta = compute_emotion_discrepancy(pa, pb)
+            # Euclidean magnitude: ||Δ||_2 = sqrt( ∑_{k=1}^6 Δ_k^2 )
+            d = compute_discrepancy_magnitude(delta)
             delta_norms.append(d)
+
         return (
             torch.cat(logits),
             torch.cat(labels),
             torch.cat(delta_norms),
         )
+
 
     def run(
         self,

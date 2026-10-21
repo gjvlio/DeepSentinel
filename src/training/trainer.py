@@ -16,6 +16,7 @@ Phase 2 fine-tune is optional and requires raw-data DataLoader (not cached).
 """
 from __future__ import annotations
 
+import math
 import logging
 from pathlib import Path
 from typing import Optional
@@ -34,6 +35,21 @@ from src.utils.logging_utils import TBWriter, get_logger
 
 log = get_logger(__name__)
 
+
+def compute_dann_grl_alpha(epoch: int, max_epochs: int, gamma: float = 10.0) -> float:
+    """
+    Dynamic schedule for Gradient Reversal Layer (Ganin & Lempitsky, 2015):
+        p = epoch / max_epochs ∈ [0, 1]
+        α(p) = 2 / (1 + exp(-γ · p)) - 1
+
+    Smoothly transitions from α=0 at the start of training to α ≈ 1 as training
+    progresses, allowing early feature representation formation before domain
+    invariance pressure is fully applied.
+    """
+    p = float(epoch) / max(float(max_epochs), 1.0)
+    return float(2.0 / (1.0 + math.exp(-gamma * p)) - 1.0)
+
+
 # Sarcasm decision threshold. MUStARD (Castro et al., 2019) is class-balanced
 # (345 sarcastic / 345 non-sarcastic), so 0.5 is the Bayes-optimal cut for a
 # sigmoid head trained with BCE under balanced priors — matches the fake/real
@@ -43,6 +59,7 @@ SARCASM_THRESHOLD = 0.5
 
 class EarlyStopping:
     def __init__(self, patience: int = 5, min_delta: float = 1e-4):
+
         self.patience  = patience
         self.min_delta = min_delta
         self.best      = float("inf")
@@ -221,9 +238,8 @@ class Trainer:
         n_batches = len(self.train_loader)
         first_batch = (epoch == 1)
 
-        import numpy as np
-        p_val = float(epoch) / max(float(max_epochs), 1.0)
-        grl_alpha = float(2.0 / (1.0 + np.exp(-10.0 * p_val)) - 1.0)
+        # Dynamic GRL schedule: α(p) = 2 / (1 + exp(-10p)) - 1
+        grl_alpha = compute_dann_grl_alpha(epoch, max_epochs, gamma=10.0)
 
         pbar = tqdm(self.train_loader, desc=f"P1 Train Ep{epoch}", unit="batch",
                     leave=False, dynamic_ncols=True)
@@ -471,9 +487,8 @@ class Trainer:
         self.model.train()
         total_loss = 0.0
 
-        import numpy as np
-        p_val = float(epoch) / max(float(max_epochs), 1.0)
-        grl_alpha = float(2.0 / (1.0 + np.exp(-10.0 * p_val)) - 1.0)
+        # Dynamic GRL schedule: α(p) = 2 / (1 + exp(-10p)) - 1
+        grl_alpha = compute_dann_grl_alpha(epoch, max_epochs, gamma=10.0)
 
         pbar = tqdm(self.train_loader, desc=f"P2 Train Ep{epoch}", unit="batch",
                     leave=False, dynamic_ncols=True)

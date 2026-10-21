@@ -6,21 +6,27 @@ ACE-Net baseline, both scored on identical FakeAVCeleb clips).
 Two tests, both paired (same clips → correlated, not independent samples):
 
   delong_test()             — DeLong (1988) / Sun & Xu (2014) fast algorithm.
-                               Paired significance test on AUC-ROC. Standard
-                               in the deepfake-detection literature.
+                                Paired significance test on AUC-ROC. Standard
+                                in the deepfake-detection literature.
   paired_bootstrap_scorecard() — resamples the SAME indices for both
-                               frameworks each iteration, tracks the metric
-                               difference. Covers Accuracy/Precision/Recall/F1
-                               (metrics DeLong doesn't reach) with a p-value.
+                                frameworks each iteration, tracks the metric
+                                difference. Covers Accuracy/Precision/Recall/F1
+                                (metrics DeLong doesn't reach) with a p-value.
+
+Note on Software Engineering Design:
+    Statistical significance formulas (DeLong variance-covariance matrix,
+    paired bootstrap confidence intervals, and normal p-values) are implemented
+    natively without third-party black-box libraries (scipy, scikit-learn).
 """
 from __future__ import annotations
 
+import math
 from dataclasses import dataclass
 from typing import Sequence
 
 import numpy as np
-from scipy.stats import norm
-from sklearn.metrics import roc_auc_score
+
+from .metrics import compute_roc_auc, extract_confusion_counts
 
 
 # ── DeLong's test ────────────────────────────────────────────────────────────
@@ -72,6 +78,15 @@ def _fast_delong(scores: np.ndarray, n_pos: int) -> tuple[np.ndarray, np.ndarray
     return aucs, cov
 
 
+def _standard_normal_sf(z: float) -> float:
+    """
+    Survival function (1 - CDF) of standard normal distribution:
+        P(Z > z) = 0.5 * erfc(z / sqrt(2))
+    Implemented via standard library math.erfc for high numerical precision.
+    """
+    return 0.5 * math.erfc(z / math.sqrt(2.0))
+
+
 @dataclass
 class DeLongResult:
     auc_a: float
@@ -97,7 +112,8 @@ def delong_test(y_true: Sequence[int], scores_a: Sequence[float], scores_b: Sequ
     diff = aucs[0] - aucs[1]
     var = cov[0, 0] + cov[1, 1] - 2 * cov[0, 1]
     z = 0.0 if var <= 0 else diff / np.sqrt(var)
-    p = 2 * (1 - norm.cdf(abs(z)))
+    # Two-sided p-value from standard normal distribution
+    p = 2.0 * _standard_normal_sf(abs(float(z)))
     return DeLongResult(auc_a=float(aucs[0]), auc_b=float(aucs[1]), z=float(z), p_value=float(p))
 
 
@@ -105,16 +121,22 @@ def delong_test(y_true: Sequence[int], scores_a: Sequence[float], scores_b: Sequ
 
 def binary_metrics(y: np.ndarray, scores: np.ndarray, thresh: float) -> dict:
     preds = (scores >= thresh).astype(int)
-    tp = int(((preds == 1) & (y == 1)).sum())
-    fp = int(((preds == 1) & (y == 0)).sum())
-    fn = int(((preds == 0) & (y == 1)).sum())
-    tn = int(((preds == 0) & (y == 0)).sum())
-    acc = (tp + tn) / max(len(y), 1)
-    prec = tp / max(tp + fp, 1)
-    rec = tp / max(tp + fn, 1)
-    f1 = 2 * prec * rec / max(prec + rec, 1e-8)
-    auc = roc_auc_score(y, scores) if len(np.unique(y)) == 2 else float("nan")
-    return {"accuracy": acc, "precision": prec, "recall": rec, "f1": f1, "auc": auc}
+    tp, tn, fp, fn, n = extract_confusion_counts(y, preds)
+    acc = (tp + tn) / n if n > 0 else 0.0
+    prec = tp / (tp + fp) if (tp + fp) > 0 else 0.0
+    rec = tp / (tp + fn) if (tp + fn) > 0 else 0.0
+    spec = tn / (tn + fp) if (tn + fp) > 0 else 0.0
+    ba = (rec + spec) / 2.0
+    f1 = 2.0 * prec * rec / (prec + rec) if (prec + rec) > 0 else 0.0
+    try:
+        auc = compute_roc_auc(y, scores) if len(np.unique(y)) == 2 else float("nan")
+    except ValueError:
+        auc = float("nan")
+    return {
+        "accuracy": acc, "precision": prec, "recall": rec,
+        "specificity": spec, "balanced_accuracy": ba, "f1": f1, "auc": auc,
+        "tp": tp, "tn": tn, "fp": fp, "fn": fn
+    }
 
 
 @dataclass
@@ -197,3 +219,50 @@ def print_scorecard(name_a: str, name_b: str, delong: DeLongResult, bootstrap: l
     print(f"  DeLong's test (AUC, paired):  AUC_a={delong.auc_a:.4f}  AUC_b={delong.auc_b:.4f}  "
           f"z={delong.z:.4f}  p={delong.p_value:.4f}  -> {sig_str}")
     print(f"{'=' * width}\n")
+
+
+if __name__ == "__main__":
+    import csv
+    from pathlib import Path
+
+    print("\n" + "=" * 84)
+    print("   STATISTICAL SIGNIFICANCE TESTING -- DEEPSENTINEL VS BASELINES (PAIRED)")
+    print("=" * 84)
+    print("Sun & Xu (2014) Fast DeLong Algorithm + Efron Paired Bootstrap (N=2,000)\n")
+
+    csv_path = Path("data/eval_results/preds_acenet_adapted_700.csv")
+    if not csv_path.exists():
+        csv_path = Path(__file__).resolve().parents[2] / "data" / "eval_results" / "preds_acenet_adapted_700.csv"
+
+    if csv_path.exists():
+        print(f"Loading paired evaluation results from: {csv_path.name} (N = 700 clips)")
+        labels, scores_ds, scores_ace = [], [], []
+        with open(csv_path, mode="r", encoding="utf-8") as f:
+            reader = csv.DictReader(f)
+            for row in reader:
+                labels.append(int(row["fake_label"]))
+                scores_ds.append(float(row["deepsentinel_score"]))
+                scores_ace.append(float(row["acenet_score"]))
+
+        labels = np.array(labels)
+        scores_ds = np.array(scores_ds)
+        scores_ace = np.array(scores_ace)
+
+        # 1. Paired DeLong test for AUC
+        delong_res = delong_test(labels, scores_ds, scores_ace)
+
+        # 2. Paired bootstrap scorecard
+        scorecard = paired_bootstrap_scorecard(labels, scores_ds, scores_ace, thresh=0.5, n_boot=2000, seed=42)
+
+        # 3. Print report
+        print_scorecard("DeepSentinel", "ACE-Net", delong_res, scorecard)
+    else:
+        print(f"[!] Paired CSV not found at {csv_path}. Running with synthetic paired benchmark...")
+        rng = np.random.default_rng(42)
+        y = np.array([1]*350 + [0]*350)
+        s_a = np.clip(y * 0.8 + rng.normal(0, 0.2, 700), 0.01, 0.99)
+        s_b = np.clip(y * 0.6 + rng.normal(0, 0.3, 700), 0.01, 0.99)
+        delong_res = delong_test(y, s_a, s_b)
+        scorecard = paired_bootstrap_scorecard(y, s_a, s_b, thresh=0.5, n_boot=1000, seed=42)
+        print_scorecard("Model_A", "Model_B", delong_res, scorecard)
+

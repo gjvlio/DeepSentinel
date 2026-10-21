@@ -1,15 +1,40 @@
 """
-classifier.py — MLP that maps [bilinear_fused ; delta] → P(fake) logit.
+classifier.py — Deepfake Detection Classifier MLP with Squeeze-and-Excitation (SE).
 
-Input:  (B, 8198)  = 8192 (CBP) + 6 (delta = |emotion_A - emotion_B|)
-Output: (B, 1)     raw logit — sigmoid applied externally by BCEWithLogitsLoss.
+Mathematical Formulation (Paper Section 3, Stage 5):
+Given the multimodal representation x ∈ R^{input_dim}
+(e.g., x_299 = [fused_proj || fused_emo || Δ || P_sarc] ∈ R^{299}):
 
-At inference, call torch.sigmoid(logit) to get P(fake) ∈ [0, 1].
+1. First Dense Layer + Normalization:
+       h_1 = GELU(LayerNorm(W_1 · x + b_1)) ∈ R^{512}
+
+2. Squeeze-and-Excitation (1D SE Channel Attention; Hu et al., 2018):
+       s = σ( W_{se,2} · GELU(W_{se,1} · h_1) ) ∈ (0, 1)^{512}
+       h_{1, SE} = h_1 ⊙ s
+   Learns adaptive channel recalibration across affective and physical features.
+
+3. Second Dense Layer + Regularization:
+       h_2 = GELU(LayerNorm(W_2 · Dropout(h_{1, SE}) + b_2)) ∈ R^{128}
+
+4. Output Scoring:
+       logit = W_3 · h_2 + b_3 ∈ R^1
+   At inference, calibrated P(fake) = σ(logit) = 1 / (1 + exp(-logit)).
 """
 from __future__ import annotations
 
 import torch
 import torch.nn as nn
+
+
+
+def apply_squeeze_and_excitation_1d(x: torch.Tensor, se_fc: nn.Sequential) -> torch.Tensor:
+    """
+    1D Channel Squeeze-and-Excitation gating (Hu et al., 2018):
+        s = σ( W_2 · GELU(W_1 · x) ) ∈ (0, 1)^C
+        x_SE = x ⊙ s
+    """
+    w = se_fc(x)
+    return x * w
 
 
 class SqueezeExcitation1D(nn.Module):
@@ -23,8 +48,8 @@ class SqueezeExcitation1D(nn.Module):
         )
 
     def forward(self, x: torch.Tensor) -> torch.Tensor:
-        w = self.fc(x)
-        return x * w
+        return apply_squeeze_and_excitation_1d(x, self.fc)
+
 
 
 class ClassifierMLP(nn.Module):
