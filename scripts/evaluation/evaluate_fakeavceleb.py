@@ -365,7 +365,7 @@ class FakeAVCelebEvalDataset(Dataset):
         
         c = self.clips[idx]
         clip_id = c["clip_id"]
-        video_path = c["video_path"]
+        video_path = c.get("video_path", "")
         
         # 1. Audio (Robust FFmpeg extraction + Wav2Vec2)
         wav_path = self.pipeline._wav_path(clip_id)

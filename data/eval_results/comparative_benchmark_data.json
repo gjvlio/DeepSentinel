@@ -20,20 +20,20 @@
       "modality": "Affect-Bilinear Cross-Attention (Audio + Video + Text)",
       "color": "#0284c7",
       "metrics": {
-        "accuracy": 82.14,
-        "balanced_accuracy": 82.14,
-        "precision": 79.22,
-        "recall_fake": 87.14,
-        "specificity_real": 77.14,
-        "f1_score": 0.8299,
-        "mcc": 0.6461,
-        "auc_roc": 0.902,
-        "auc_ci_lower": 0.877,
-        "auc_ci_upper": 0.924,
-        "tp": 305,
-        "fp": 80,
-        "tn": 270,
-        "fn": 45
+        "accuracy": 80.86,
+        "balanced_accuracy": 80.86,
+        "precision": 80.86,
+        "recall_fake": 80.86,
+        "specificity_real": 80.86,
+        "f1_score": 0.8086,
+        "mcc": 0.6171,
+        "auc_roc": 0.8748,
+        "auc_ci_lower": 0.849,
+        "auc_ci_upper": 0.899,
+        "tp": 283,
+        "fp": 67,
+        "tn": 283,
+        "fn": 67
       },
       "delong_test": {
         "p_value": null,
@@ -175,8 +175,8 @@
         "fn": 168
       },
       "delong_test": {
-        "p_value": 0.000222,
-        "significance": "p < 0.001 (Statistically Significant)",
+        "p_value": 0.002482,
+        "significance": "p = 0.0025*",
         "z_score": null
       }
     }
@@ -217,8 +217,8 @@
     "faceswap-wav2lip": {
       "DeepSentinel (Ours)": {
         "total": 58,
-        "correct": 57,
-        "accuracy": 98.28
+        "correct": 56,
+        "accuracy": 96.55
       },
       "MesoNet-4": {
         "total": 58,
@@ -249,8 +249,8 @@
     "fsgan": {
       "DeepSentinel (Ours)": {
         "total": 40,
-        "correct": 25,
-        "accuracy": 62.5
+        "correct": 23,
+        "accuracy": 57.5
       },
       "MesoNet-4": {
         "total": 40,
@@ -281,8 +281,8 @@
     "fsgan-wav2lip": {
       "DeepSentinel (Ours)": {
         "total": 69,
-        "correct": 68,
-        "accuracy": 98.55
+        "correct": 67,
+        "accuracy": 97.1
       },
       "MesoNet-4": {
         "total": 69,
@@ -313,8 +313,8 @@
     "real": {
       "DeepSentinel (Ours)": {
         "total": 350,
-        "correct": 270,
-        "accuracy": 77.14
+        "correct": 283,
+        "accuracy": 80.86
       },
       "MesoNet-4": {
         "total": 350,
@@ -377,8 +377,8 @@
     "wav2lip": {
       "DeepSentinel (Ours)": {
         "total": 165,
-        "correct": 141,
-        "accuracy": 85.45
+        "correct": 123,
+        "accuracy": 74.55
       },
       "MesoNet-4": {
         "total": 165,
@@ -411,8 +411,8 @@
     "Visual Swap Only": {
       "DeepSentinel (Ours)": {
         "total": 53,
-        "correct": 36,
-        "accuracy": 67.92
+        "correct": 34,
+        "accuracy": 64.15
       },
       "MesoNet-4": {
         "total": 53,
@@ -475,8 +475,8 @@
     "Audio-Visual Combined (Sync/Lip)": {
       "DeepSentinel (Ours)": {
         "total": 292,
-        "correct": 266,
-        "accuracy": 91.1
+        "correct": 246,
+        "accuracy": 84.25
       },
       "MesoNet-4": {
         "total": 292,
@@ -507,8 +507,8 @@
     "Authentic / Real Clips": {
       "DeepSentinel (Ours)": {
         "total": 350,
-        "correct": 270,
-        "accuracy": 77.14
+        "correct": 283,
+        "accuracy": 80.86
       },
       "MesoNet-4": {
         "total": 350,

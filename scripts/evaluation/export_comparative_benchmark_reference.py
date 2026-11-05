@@ -10,15 +10,49 @@ import csv
 import json
 from pathlib import Path
 import numpy as np
-from sklearn.metrics import (
-    accuracy_score,
-    confusion_matrix,
-    f1_score,
-    matthews_corrcoef,
-    precision_score,
-    recall_score,
-    roc_auc_score,
-)
+try:
+    from sklearn.metrics import (
+        accuracy_score,
+        confusion_matrix,
+        f1_score,
+        matthews_corrcoef,
+        precision_score,
+        recall_score,
+        roc_auc_score,
+    )
+except ImportError:
+    def accuracy_score(y_true, y_pred):
+        return float(np.mean(np.array(y_true) == np.array(y_pred)))
+    def confusion_matrix(y_true, y_pred):
+        yt, yp = np.array(y_true), np.array(y_pred)
+        return np.array([[int(np.sum((yt == 0) & (yp == 0))), int(np.sum((yt == 0) & (yp == 1)))],
+                         [int(np.sum((yt == 1) & (yp == 0))), int(np.sum((yt == 1) & (yp == 1)))]])
+    def precision_score(y_true, y_pred, zero_division=0):
+        yt, yp = np.array(y_true), np.array(y_pred)
+        tp, fp = int(np.sum((yt == 1) & (yp == 1))), int(np.sum((yt == 0) & (yp == 1)))
+        return float(tp / (tp + fp)) if (tp + fp) > 0 else float(zero_division)
+    def recall_score(y_true, y_pred, zero_division=0):
+        yt, yp = np.array(y_true), np.array(y_pred)
+        tp, fn = int(np.sum((yt == 1) & (yp == 1))), int(np.sum((yt == 1) & (yp == 0)))
+        return float(tp / (tp + fn)) if (tp + fn) > 0 else float(zero_division)
+    def f1_score(y_true, y_pred, zero_division=0):
+        p, r = precision_score(y_true, y_pred), recall_score(y_true, y_pred)
+        return float(2 * p * r / (p + r)) if (p + r) > 0 else float(zero_division)
+    def matthews_corrcoef(y_true, y_pred):
+        yt, yp = np.array(y_true), np.array(y_pred)
+        tp = float(np.sum((yt == 1) & (yp == 1)))
+        tn = float(np.sum((yt == 0) & (yp == 0)))
+        fp = float(np.sum((yt == 0) & (yp == 1)))
+        fn = float(np.sum((yt == 1) & (yp == 0)))
+        num = (tp * tn) - (fp * fn)
+        den = np.sqrt((tp + fp) * (tp + fn) * (tn + fp) * (tn + fn))
+        return float(num / den) if den > 0 else 0.0
+    def roc_auc_score(y_true, y_score):
+        yt, ys = np.array(y_true), np.array(y_score)
+        pos, neg = ys[yt == 1], ys[yt == 0]
+        if len(pos) == 0 or len(neg) == 0: return 0.5
+        diff = pos[:, None] - neg[None, :]
+        return float((np.sum(diff > 0) + 0.5 * np.sum(diff == 0)) / (len(pos) * len(neg)))
 
 REPO_ROOT = Path(__file__).resolve().parents[2]
 import sys
