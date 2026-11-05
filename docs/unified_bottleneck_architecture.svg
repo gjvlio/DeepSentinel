@@ -1,0 +1,185 @@
+<svg xmlns="http://www.w3.org/2000/svg" viewBox="0 0 1000 680" width="100%" height="100%" style="background-color: #0f172a; font-family: -apple-system, BlinkMacSystemFont, 'Segoe UI', Roboto, Helvetica, Arial, sans-serif;">
+  <defs>
+    <!-- Gradients -->
+    <linearGradient id="grad-sarc" x1="0%" y1="0%" x2="0%" y2="100%">
+      <stop offset="0%" stop-color="#fef08a"/>
+      <stop offset="100%" stop-color="#fef9c3"/>
+    </linearGradient>
+    <linearGradient id="grad-cbp" x1="0%" y1="0%" x2="0%" y2="100%">
+      <stop offset="0%" stop-color="#bbf7d0"/>
+      <stop offset="100%" stop-color="#dcfce7"/>
+    </linearGradient>
+    <linearGradient id="grad-emo-head" x1="0%" y1="0%" x2="0%" y2="100%">
+      <stop offset="0%" stop-color="#fef08a"/>
+      <stop offset="100%" stop-color="#fef9c3"/>
+    </linearGradient>
+    <linearGradient id="grad-cooccur" x1="0%" y1="0%" x2="0%" y2="100%">
+      <stop offset="0%" stop-color="#fed7aa"/>
+      <stop offset="100%" stop-color="#ffedd5"/>
+    </linearGradient>
+    <linearGradient id="grad-diff" x1="0%" y1="0%" x2="0%" y2="100%">
+      <stop offset="0%" stop-color="#fed7aa"/>
+      <stop offset="100%" stop-color="#ffedd5"/>
+    </linearGradient>
+    <linearGradient id="grad-bottleneck" x1="0%" y1="0%" x2="100%" y2="0%">
+      <stop offset="0%" stop-color="#1e1b4b"/>
+      <stop offset="100%" stop-color="#0f172a"/>
+    </linearGradient>
+    
+    <!-- Shadow Filter -->
+    <filter id="shadow" x="-5%" y="-5%" width="110%" height="115%" filterUnits="userSpaceOnUse">
+      <feDropShadow dx="0" dy="4" stdDeviation="6" flood-color="#000000" flood-opacity="0.4"/>
+    </filter>
+    
+    <!-- Arrow Marker -->
+    <marker id="arrow" viewBox="0 0 10 10" refX="6" refY="5" markerWidth="6" markerHeight="6" orient="auto-start-reverse">
+      <path d="M 0 1.5 L 8 5 L 0 8.5 z" fill="#94a3b8"/>
+    </marker>
+    <marker id="arrow-green" viewBox="0 0 10 10" refX="6" refY="5" markerWidth="6" markerHeight="6" orient="auto-start-reverse">
+      <path d="M 0 1.5 L 8 5 L 0 8.5 z" fill="#10b981"/>
+    </marker>
+    <marker id="arrow-orange" viewBox="0 0 10 10" refX="6" refY="5" markerWidth="6" markerHeight="6" orient="auto-start-reverse">
+      <path d="M 0 1.5 L 8 5 L 0 8.5 z" fill="#f97316"/>
+    </marker>
+    <marker id="arrow-yellow" viewBox="0 0 10 10" refX="6" refY="5" markerWidth="6" markerHeight="6" orient="auto-start-reverse">
+      <path d="M 0 1.5 L 8 5 L 0 8.5 z" fill="#eab308"/>
+    </marker>
+    <marker id="arrow-cyan" viewBox="0 0 10 10" refX="6" refY="5" markerWidth="6" markerHeight="6" orient="auto-start-reverse">
+      <path d="M 0 1.5 L 8 5 L 0 8.5 z" fill="#06b6d4"/>
+    </marker>
+  </defs>
+
+  <!-- Title & Subtitle -->
+  <text x="500" y="42" font-size="20" font-weight="700" fill="#f8fafc" text-anchor="middle" letter-spacing="0.5">UNIFIED BOTTLENECK FUSION ARCHITECTURE</text>
+  <text x="500" y="65" font-size="13" font-weight="400" fill="#94a3b8" text-anchor="middle">Modular parallel streams converging into 299D bottleneck vector</text>
+
+  <!-- ==================== COLUMN 1: SARCASM HEAD ==================== -->
+  <g filter="url(#shadow)">
+    <!-- Sarcasm Head Card -->
+    <rect x="40" y="110" width="180" height="75" rx="8" fill="url(#grad-sarc)" stroke="#ca8a04" stroke-width="1.5"/>
+    <text x="130" y="138" font-size="14" font-weight="700" fill="#854d0e" text-anchor="middle">Sarcasm Head</text>
+    <text x="130" y="160" font-size="13" font-style="italic" fill="#713f12" text-anchor="middle">P_sarcasm ∈ ℝ¹</text>
+  </g>
+
+  <!-- Sarcasm Stream Down to Bottleneck (Direct straight line) -->
+  <path d="M 130 185 L 130 460" fill="none" stroke="#eab308" stroke-width="2.5" stroke-dasharray="4,4" marker-end="url(#arrow-yellow)"/>
+  <rect x="95" y="300" width="70" height="24" rx="12" fill="#1e293b" stroke="#eab308" stroke-width="1"/>
+  <text x="130" y="316" font-size="11" font-weight="600" fill="#fde047" text-anchor="middle">1D Prior</text>
+
+
+  <!-- ==================== COLUMN 2: CBP FEATURE FUSION ==================== -->
+  <g filter="url(#shadow)">
+    <!-- CBP Fusion Card -->
+    <rect x="250" y="110" width="220" height="110" rx="8" fill="url(#grad-cbp)" stroke="#16a34a" stroke-width="1.5"/>
+    <text x="360" y="135" font-size="14" font-weight="700" fill="#14532d" text-anchor="middle">Compact Bilinear Pooling</text>
+    <text x="360" y="154" font-size="11.5" fill="#166534" text-anchor="middle">Count Sketch FFT + L2 Norm</text>
+    <line x1="265" y1="165" x2="455" y2="165" stroke="#86efac" stroke-width="1"/>
+    <text x="360" y="183" font-size="12" font-weight="600" fill="#15803d" text-anchor="middle">Linear + LayerNorm + GELU</text>
+    <text x="360" y="202" font-size="12" font-style="italic" fill="#166534" text-anchor="middle">fused_proj ∈ ℝ²⁵⁶</text>
+  </g>
+
+  <!-- Input indicators above CBP -->
+  <path d="M 310 82 L 310 108" fill="none" stroke="#94a3b8" stroke-width="1.5" marker-end="url(#arrow)"/>
+  <text x="310" y="77" font-size="11" fill="#cbd5e1" text-anchor="middle">Z_at (1536D)</text>
+  <path d="M 410 82 L 410 108" fill="none" stroke="#94a3b8" stroke-width="1.5" marker-end="url(#arrow)"/>
+  <text x="410" y="77" font-size="11" fill="#cbd5e1" text-anchor="middle">Z_v (768D)</text>
+
+  <!-- CBP Stream Down to Bottleneck -->
+  <path d="M 360 220 L 360 460" fill="none" stroke="#10b981" stroke-width="2.5" marker-end="url(#arrow-green)"/>
+  <rect x="315" y="300" width="90" height="24" rx="12" fill="#1e293b" stroke="#10b981" stroke-width="1"/>
+  <text x="360" y="316" font-size="11" font-weight="600" fill="#6ee7b7" text-anchor="middle">256D Features</text>
+
+
+  <!-- ==================== COLUMNS 3 & 4: EMOTION INTERACTION MODULE ==================== -->
+  <!-- Container Box for Emotion Subsystem -->
+  <rect x="500" y="95" width="460" height="325" rx="12" fill="#1e293b" fill-opacity="0.6" stroke="#475569" stroke-width="1.5" stroke-dasharray="6,4"/>
+  <text x="730" y="118" font-size="12" font-weight="700" fill="#94a3b8" text-anchor="middle" letter-spacing="1">EMOTION INTERACTION MODULE</text>
+
+  <!-- Emotion Heads (Top of subsystem) -->
+  <g filter="url(#shadow)">
+    <!-- Head A -->
+    <rect x="525" y="135" width="185" height="65" rx="8" fill="url(#grad-emo-head)" stroke="#ca8a04" stroke-width="1.5"/>
+    <text x="617" y="160" font-size="13.5" font-weight="700" fill="#854d0e" text-anchor="middle">Emotion Head A (Audio)</text>
+    <text x="617" y="182" font-size="13" font-style="italic" fill="#713f12" text-anchor="middle">P_A ∈ ℝ⁶</text>
+
+    <!-- Head B -->
+    <rect x="750" y="135" width="185" height="65" rx="8" fill="url(#grad-emo-head)" stroke="#ca8a04" stroke-width="1.5"/>
+    <text x="842" y="160" font-size="13.5" font-weight="700" fill="#854d0e" text-anchor="middle">Emotion Head B (Visual)</text>
+    <text x="842" y="182" font-size="13" font-style="italic" fill="#713f12" text-anchor="middle">P_B ∈ ℝ⁶</text>
+  </g>
+
+  <!-- Clean Branching from Heads to Pairwise Interactions -->
+  <!-- From Head A & B to Co-occurrence -->
+  <path d="M 590 200 L 590 250 L 610 250" fill="none" stroke="#f97316" stroke-width="1.5" marker-end="url(#arrow-orange)"/>
+  <path d="M 815 200 L 815 250 L 690 250" fill="none" stroke="#f97316" stroke-width="1.5" marker-end="url(#arrow-orange)"/>
+
+  <!-- From Head A & B to Mismatch -->
+  <path d="M 645 200 L 645 325 L 775 325" fill="none" stroke="#f97316" stroke-width="1.5" marker-end="url(#arrow-orange)"/>
+  <path d="M 870 200 L 870 325 L 855 325" fill="none" stroke="#f97316" stroke-width="1.5" marker-end="url(#arrow-orange)"/>
+
+  <!-- Emotion Co-occurrence Box (Outer product) -->
+  <g filter="url(#shadow)">
+    <rect x="525" y="225" width="185" height="65" rx="8" fill="url(#grad-cooccur)" stroke="#ea580c" stroke-width="1.5"/>
+    <text x="617" y="248" font-size="13" font-weight="700" fill="#9a3412" text-anchor="middle">Emotion Co-occurrence</text>
+    <text x="617" y="266" font-size="11.5" fill="#c2410c" text-anchor="middle">vec(P_A ⊗ P_B)</text>
+    <text x="617" y="281" font-size="11" font-style="italic" font-weight="600" fill="#9a3412" text-anchor="middle">fused_emo ∈ ℝ³⁶</text>
+  </g>
+
+  <!-- Emotion Incongruence / Mismatch Box -->
+  <g filter="url(#shadow)">
+    <rect x="750" y="300" width="185" height="65" rx="8" fill="url(#grad-diff)" stroke="#ea580c" stroke-width="1.5"/>
+    <text x="842" y="323" font-size="13" font-weight="700" fill="#9a3412" text-anchor="middle">Emotion Incongruence</text>
+    <text x="842" y="341" font-size="11.5" fill="#c2410c" text-anchor="middle">|P_A − P_B|</text>
+    <text x="842" y="356" font-size="11" font-style="italic" font-weight="600" fill="#9a3412" text-anchor="middle">Δ ∈ ℝ⁶</text>
+  </g>
+
+  <!-- Co-occurrence straight down to Bottleneck -->
+  <path d="M 617 290 L 617 460" fill="none" stroke="#f97316" stroke-width="2.5" marker-end="url(#arrow-orange)"/>
+  <rect x="572" y="380" width="90" height="24" rx="12" fill="#1e293b" stroke="#f97316" stroke-width="1"/>
+  <text x="617" y="396" font-size="11" font-weight="600" fill="#fdba74" text-anchor="middle">36D Matrix</text>
+
+  <!-- Mismatch straight down to Bottleneck -->
+  <path d="M 842 365 L 842 460" fill="none" stroke="#f97316" stroke-width="2.5" marker-end="url(#arrow-orange)"/>
+  <rect x="802" y="395" width="80" height="24" rx="12" fill="#1e293b" stroke="#f97316" stroke-width="1"/>
+  <text x="842" y="411" font-size="11" font-weight="600" fill="#fdba74" text-anchor="middle">6D Delta</text>
+
+
+  <!-- ==================== UNIFIED BOTTLENECK VECTOR (BOTTOM) ==================== -->
+  <g filter="url(#shadow)">
+    <!-- Container Bar -->
+    <rect x="40" y="465" width="920" height="85" rx="10" fill="#020617" stroke="#38bdf8" stroke-width="2"/>
+    
+    <!-- Title -->
+    <text x="500" y="492" font-size="14.5" font-weight="800" fill="#38bdf8" text-anchor="middle" letter-spacing="1">
+      UNIFIED BOTTLENECK VECTOR (x_299 ∈ ℝ²⁹⁹)
+    </text>
+
+    <!-- Partitions -->
+    <!-- Sarcasm (1D) -->
+    <rect x="55" y="503" width="150" height="36" rx="6" fill="#ca8a04" fill-opacity="0.3" stroke="#eab308" stroke-width="1.5"/>
+    <text x="130" y="525" font-size="12" font-weight="700" fill="#fef08a" text-anchor="middle">Sarcasm [1D]</text>
+
+    <!-- CBP (256D) -->
+    <rect x="215" y="503" width="290" height="36" rx="6" fill="#15803d" fill-opacity="0.3" stroke="#22c55e" stroke-width="1.5"/>
+    <text x="360" y="525" font-size="12" font-weight="700" fill="#bbf7d0" text-anchor="middle">CBP Projection [256D]</text>
+
+    <!-- Co-occurrence (36D) -->
+    <rect x="515" y="503" width="205" height="36" rx="6" fill="#c2410c" fill-opacity="0.3" stroke="#f97316" stroke-width="1.5"/>
+    <text x="617" y="525" font-size="12" font-weight="700" fill="#fed7aa" text-anchor="middle">Co-occurrence [36D]</text>
+
+    <!-- Mismatch (6D) -->
+    <rect x="730" y="503" width="215" height="36" rx="6" fill="#c2410c" fill-opacity="0.3" stroke="#f97316" stroke-width="1.5"/>
+    <text x="837" y="525" font-size="12" font-weight="700" fill="#fed7aa" text-anchor="middle">Incongruence [6D]</text>
+  </g>
+
+
+  <!-- ==================== DOWNSTREAM OUTPUT / CLASSIFIER ==================== -->
+  <path d="M 500 550 L 500 595" fill="none" stroke="#38bdf8" stroke-width="2.5" marker-end="url(#arrow-cyan)"/>
+  
+  <g filter="url(#shadow)">
+    <rect x="360" y="600" width="280" height="50" rx="8" fill="#1e293b" stroke="#38bdf8" stroke-width="1.5"/>
+    <text x="500" y="622" font-size="13.5" font-weight="700" fill="#f8fafc" text-anchor="middle">Classifier MLP (299D → 1)</text>
+    <text x="500" y="640" font-size="12" font-weight="500" fill="#38bdf8" text-anchor="middle">Output: P(fake) ∈ [0, 1]</text>
+  </g>
+
+</svg>

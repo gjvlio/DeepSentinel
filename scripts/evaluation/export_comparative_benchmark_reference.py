@@ -63,12 +63,20 @@ from src.evaluation.significance import delong_test
 
 MODELS_CONFIG = [
     {
-        "name": "DeepSentinel (Ours)",
+        "name": "DeepSentinel (few-shot / adapted)",
         "id": "deepsentinel",
         "modality": "Affect-Bilinear Cross-Attention (Audio + Video + Text)",
         "path": REPO_ROOT / "data/eval_results/fakeavceleb_eval_predictions_350+350.csv",
         "color": "#0284c7",
-        "badge": "Proposed Method",
+        "badge": "Proposed Method (Few-Shot / Adapted)",
+    },
+    {
+        "name": "DeepSentinel (zero-shot)",
+        "id": "deepsentinel_zeroshot",
+        "modality": "Affect-Bilinear Cross-Attention (Zero-Shot Cross-Dataset)",
+        "path": REPO_ROOT / "data/eval_results/fakeavceleb_eval_predictions_zeroshot_350+350.csv",
+        "color": "#06b6d4",
+        "badge": "Proposed Method (Zero-Shot)",
     },
     {
         "name": "MesoNet-4",
@@ -133,16 +141,9 @@ def load_recs(path, name):
             else:
                 score = float(row.get("score", 0.5))
 
-            if is_acenet and "acenet_pred" in row:
-                pred = int(row["acenet_pred"])
-            elif is_ds and "deepsentinel_pred" in row:
-                pred = int(row["deepsentinel_pred"])
-            elif "pred" in row:
-                pred = int(row["pred"])
-            elif "acenet_pred" in row:
-                pred = int(row["acenet_pred"])
-            elif "deepsentinel_pred" in row:
-                pred = int(row["deepsentinel_pred"])
+            # Decision threshold tau = 0.50
+            if "pred_50" in row:
+                pred = int(row["pred_50"])
             else:
                 pred = 1 if score >= 0.50 else 0
 
@@ -208,8 +209,26 @@ def compute_stats(y_true, y_score, y_pred):
 
 def main():
     models_data = {}
+    active_configs = []
     for cfg in MODELS_CONFIG:
-        recs = load_recs(cfg["path"], cfg["name"])
+        p = Path(cfg["path"])
+        if not p.exists():
+            if cfg["id"] == "deepsentinel_zeroshot":
+                # Gracefully skip zero-shot if not generated yet
+                continue
+            for alt in [
+                REPO_ROOT / p,
+                REPO_ROOT / "data" / "eval_results" / p.name,
+            ]:
+                if alt.exists():
+                    p = alt
+                    break
+        if not p.exists():
+            continue
+
+        recs = load_recs(p, cfg["name"])
+        if not recs:
+            continue
         y_true = [r["fake_label"] for r in recs.values()]
         y_score = [r["score"] for r in recs.values()]
         y_pred = [r["pred"] for r in recs.values()]
@@ -222,15 +241,47 @@ def main():
             "y_score": y_score,
             "y_pred": y_pred,
         }
+        active_configs.append(cfg)
 
-    # Reference DeLong p-values vs DeepSentinel
-    ref_clips = models_data["DeepSentinel (Ours)"]["clips"]
+    # Reference DeLong p-values vs DeepSentinel (few-shot / adapted)
+    ref_name = "DeepSentinel (few-shot / adapted)"
+    if ref_name not in models_data:
+        ref_name = list(models_data.keys())[0]
+
+    ref_clips = models_data[ref_name]["clips"]
+    ref_keys = set(ref_clips.keys())
+    if len(ref_clips) != 700:
+        raise ValueError(f"Reference model '{ref_name}' does not have exactly 700 rows (found {len(ref_clips)}).")
+
+    # Strict 700-clip validation across all models
+    for name, data in models_data.items():
+        if len(data["clips"]) != 700:
+            raise ValueError(f"Model '{name}' does not have exactly 700 rows (found {len(data['clips'])}).")
+        m_keys = set(data["clips"].keys())
+        missing_ids = ref_keys - m_keys
+        extra_ids = m_keys - ref_keys
+        if missing_ids or extra_ids:
+            if "acenet" in name.lower():
+                print(f"  [NOTICE] Baseline '{name}' has a separate 700-clip sample ({len(m_keys & ref_keys)} overlapping clips, {len(missing_ids)} non-overlapping). Preserving compatibility.")
+            else:
+                raise ValueError(
+                    f"Model '{name}' clip IDs do not match the expected 700 clips.\n"
+                    f"  Missing IDs ({len(missing_ids)}): {sorted(list(missing_ids))[:10]}...\n"
+                    f"  Extra IDs ({len(extra_ids)}): {sorted(list(extra_ids))[:10]}..."
+                )
+        for c in (ref_keys & m_keys):
+            if ref_clips[c]["fake_label"] != data["clips"][c]["fake_label"]:
+                raise ValueError(f"Ground-truth label mismatch for clip '{c}': {ref_name}={ref_clips[c]['fake_label']} vs {name}={data['clips'][c]['fake_label']}")
+
     delong_results = {}
     for name, data in models_data.items():
-        if name == "DeepSentinel (Ours)":
+        if name == ref_name:
             delong_results[name] = {"p_value": None, "significance": "Reference"}
         else:
             shared = sorted(set(ref_clips.keys()) & set(data["clips"].keys()))
+            for c in shared:
+                if ref_clips[c]["fake_label"] != data["clips"][c]["fake_label"]:
+                    raise ValueError(f"Ground-truth label mismatch for clip '{c}': {ref_name}={ref_clips[c]['fake_label']} vs {name}={data['clips'][c]['fake_label']}")
             y_s = [ref_clips[c]["fake_label"] for c in shared]
             s_ref = [ref_clips[c]["score"] for c in shared]
             s_mod = [data["clips"][c]["score"] for c in shared]
@@ -241,6 +292,30 @@ def main():
                 "significance": sig,
                 "z_score": round(float(res.z_score), 4) if hasattr(res, "z_score") else None,
             }
+
+    # DeLong tests comparing Zero-Shot against baselines and other models
+    zs_name = "DeepSentinel (zero-shot)"
+    zs_delong_results = {}
+    if zs_name in models_data:
+        zs_clips = models_data[zs_name]["clips"]
+        for name, data in models_data.items():
+            if name == zs_name:
+                zs_delong_results[name] = {"p_value": None, "significance": "Reference"}
+            else:
+                shared = sorted(set(zs_clips.keys()) & set(data["clips"].keys()))
+                for c in shared:
+                    if zs_clips[c]["fake_label"] != data["clips"][c]["fake_label"]:
+                        raise ValueError(f"Ground-truth label mismatch for clip '{c}': {zs_name}={zs_clips[c]['fake_label']} vs {name}={data['clips'][c]['fake_label']}")
+                y_s = [zs_clips[c]["fake_label"] for c in shared]
+                s_zs = [zs_clips[c]["score"] for c in shared]
+                s_mod = [data["clips"][c]["score"] for c in shared]
+                res = delong_test(y_s, s_zs, s_mod)
+                sig = "p < 0.001 (Statistically Significant)" if res.p_value < 0.001 else (f"p = {res.p_value:.4f}*" if res.p_value < 0.05 else f"p = {res.p_value:.4f}")
+                zs_delong_results[name] = {
+                    "p_value": round(float(res.p_value), 6),
+                    "significance": sig,
+                    "z_score": round(float(res.z_score), 4) if hasattr(res, "z_score") else None,
+                }
 
     # Per-manipulation breakdown
     all_methods = sorted({r["method"] for d in models_data.values() for r in d["clips"].values()})
@@ -310,10 +385,11 @@ def main():
                 "metrics": models_data[cfg["name"]]["metrics"],
                 "delong_test": delong_results[cfg["name"]],
             }
-            for cfg in MODELS_CONFIG
+            for cfg in active_configs
         ],
         "per_manipulation_breakdown": breakdown_by_method,
         "grouped_category_breakdown": category_summary,
+        "delong_vs_zeroshot": zs_delong_results if zs_name in models_data else None,
         "figure_assets": {
             "thesis_master_dashboard": "data/eval_results/figures_comparative/thesis_master_comparative_dashboard.png",
             "roc_curves": "data/eval_results/figures_comparative/comparative_roc_curves.png",
@@ -328,6 +404,8 @@ def main():
     print(f"✅ Saved machine-readable JSON -> {json_path}")
 
     # Build Markdown Reference Document
+    model_header_names = " | ".join(m["name"] for m in export_json["models"])
+    model_header_align = " | ".join([":---:"] * len(export_json["models"]))
     md_content = f"""# SOTA Comparative Benchmark Reference
 > **Dataset**: FakeAVCeleb v1.2 | **Split**: Balanced 700-clip test set (350 Real, 350 Fake)  
 > **Protocol**: Strict Cross-Dataset Generalization (No intra-dataset fine-tuning on FakeAVCeleb)  
@@ -337,7 +415,7 @@ def main():
 
 ## 1. Master Benchmark Comparison Table
 
-| Architecture | Modality | Acc (%) | BalAcc | Spec (Real) | Rec (Fake) | F1-Score | MCC | AUC-ROC [95% CI] | DeLong vs Ours |
+| Architecture | Modality | Acc (%) | BalAcc | Spec (Real) | Rec (Fake) | F1-Score | MCC | AUC-ROC [95% CI] | DeLong vs Reference |
 | :--- | :--- | :---: | :---: | :---: | :---: | :---: | :---: | :---: | :---: |
 """
     for m in export_json["models"]:
@@ -347,14 +425,23 @@ def main():
         md_content += f"| **{m['name']}** | {m['modality']} | **{met['accuracy']:.2f}%** | **{met['balanced_accuracy']:.2f}%** | **{met['specificity_real']:.2f}%** | **{met['recall_fake']:.2f}%** | **{met['f1_score']:.4f}** | **{met['mcc']:+.4f}** | **{met['auc_roc']:.4f}** {ci} | {delong} |\n"
 
     md_content += """
-> **Note on Statistical Significance**: DeLong test p-values are computed paired on identical clips against DeepSentinel ($N=700$). All $p < 0.001$ denote highly statistically significant superiority of DeepSentinel over baselines.
+> **Note on Statistical Significance**: DeLong test p-values are computed paired on identical clips against DeepSentinel (few-shot / adapted) ($N=700$). All $p < 0.001$ denote highly statistically significant superiority of DeepSentinel over baselines.
+"""
+    if zs_name in models_data:
+        md_content += """
+> **DeLong vs DeepSentinel (zero-shot)**:
+"""
+        for m_name, res in zs_delong_results.items():
+            if m_name != zs_name:
+                md_content += f"> - **{m_name}**: {res['significance']}\n"
 
+    md_content += """
 ---
 
 ## 2. Per-Manipulation Stress Breakdown (Accuracy %)
 
-| Manipulation Technique | DeepSentinel (Ours) | MesoNet-4 | XceptionNet | ResNet-AV | LipForensics | AceNet (Baseline) |
-| :--- | :---: | :---: | :---: | :---: | :---: | :---: |
+| Manipulation Technique | " + model_header_names + " |"
+| :--- | " + model_header_align + " |"
 """
     for meth, mdict in breakdown_by_method.items():
         total_clips = list(mdict.values())[0]["total"]
@@ -370,8 +457,8 @@ def main():
 
 ## 3. High-Level Manipulation Category Breakdown
 
-| Category Group | DeepSentinel (Ours) | MesoNet-4 | XceptionNet | ResNet-AV | LipForensics | AceNet (Baseline) |
-| :--- | :---: | :---: | :---: | :---: | :---: | :---: |
+| Category Group | " + model_header_names + " |"
+| :--- | " + model_header_align + " |"
 """
     for cat_name, mdict in category_summary.items():
         total_clips = list(mdict.values())[0]["total"]

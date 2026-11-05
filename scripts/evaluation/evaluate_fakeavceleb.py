@@ -606,7 +606,7 @@ def run_inference(
     return results
 
 
-def compute_metrics(results: list[dict], user_thresh: float = 0.65) -> dict:
+def compute_metrics(results: list[dict], user_thresh: float = 0.50) -> dict:
     import numpy as np
     labels = [r["fake_label"] for r in results]
     scores = [r["score"]      for r in results]
@@ -629,7 +629,7 @@ def compute_metrics(results: list[dict], user_thresh: float = 0.65) -> dict:
     mcc_denom = np.sqrt(float((tp_50 + fp_50) * (tp_50 + fn_50) * (tn_50 + fp_50) * (tn_50 + fn_50)))
     mcc_50 = ((tp_50 * tn_50) - (fp_50 * fn_50)) / max(mcc_denom, 1e-8)
 
-    # 2. User calibrated threshold metrics (e.g. tau = 0.65)
+    # 2. User calibrated threshold metrics (e.g. tau = 0.50)
     cal_p = (np.array(scores) >= user_thresh).astype(int)
     tp_cal = int(((cal_p == 1) & (y_true == 1)).sum())
     fp_cal = int(((cal_p == 1) & (y_true == 0)).sum())
@@ -759,7 +759,7 @@ def compute_metrics(results: list[dict], user_thresh: float = 0.65) -> dict:
     )
 
 
-def per_method_breakdown(results: list[dict], cal_thresh: float = 0.65) -> None:
+def per_method_breakdown(results: list[dict], cal_thresh: float = 0.50) -> None:
     from collections import defaultdict
     by_method: dict[str, list] = defaultdict(list)
     for r in results:
@@ -908,8 +908,8 @@ def main():
                         help="Inference batch size (default: 32 on A100)")
     parser.add_argument("--workers", type=int, default=0,
                         help="DataLoader worker subprocesses (default: 0 for direct CUDA)")
-    parser.add_argument("--threshold", type=float, default=0.65,
-                        help="Classification decision threshold (default: 0.65 calibrated)")
+    parser.add_argument("--threshold", type=float, default=0.5,
+                        help="Classification decision threshold (default: 0.50 calibrated)")
     parser.add_argument("--manifest", type=str, default=None,
                         help="Path to specific held-out CSV manifest (e.g. fakeavceleb_heldout_unseen_test.csv)")
     args = parser.parse_args()
@@ -1024,7 +1024,20 @@ def main():
         model.to(args.device)
         print("  [HuggingFace] Backbone weights ready.")
         
-    model.load_state_dict(ckpt["model_state"], strict=False)
+    incompatible = model.load_state_dict(ckpt["model_state"], strict=False)
+    has_backbone_in_ckpt = any(k.startswith(("wav2vec2.", "bert.", "vit.")) for k in state_keys)
+    critical_missing = incompatible.missing_keys if has_backbone_in_ckpt else [
+        k for k in incompatible.missing_keys if not k.startswith(("wav2vec2.", "bert.", "vit."))
+    ]
+    if critical_missing or incompatible.unexpected_keys:
+        print("\n" + "=" * 70)
+        print("  [ERROR] Checkpoint state_dict mismatch detected:")
+        if critical_missing:
+            print(f"  Missing keys ({len(critical_missing)}): {critical_missing}")
+        if incompatible.unexpected_keys:
+            print(f"  Unexpected keys ({len(incompatible.unexpected_keys)}): {incompatible.unexpected_keys}")
+        print("=" * 70 + "\n")
+        sys.exit(1)
     model._has_cross_attn = any(k.startswith("cross_attn_") for k in state_keys)
     model.eval()
     print(f"  Loaded epoch {ckpt.get('epoch','?')}  val_loss={ckpt.get('val_loss', '?')}  mode={detected_mode}")
@@ -1086,7 +1099,8 @@ def main():
             for sub in ["eval_results", "logs", "checkpoints"]:
                 d_dir = d_base / sub
                 d_dir.mkdir(parents=True, exist_ok=True)
-                d_csv = d_dir / "fakeavceleb_eval_predictions.csv"
+                backup_filename = Path(args.save_csv).name if args.save_csv else "fakeavceleb_eval_predictions.csv"
+                d_csv = d_dir / backup_filename
                 try:
                     with open(d_csv, "w", newline="", encoding="utf-8") as f:
                         fieldnames = ["clip_id", "fake_label", "method", "type", "score", "pred", "pred_50", "pred_cal"]

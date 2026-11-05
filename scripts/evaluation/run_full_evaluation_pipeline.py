@@ -84,6 +84,7 @@ def main():
             "--manifest", args.manifest,
             "--device", args.device,
             "--batch_size", str(args.batch_size),
+            "--threshold", "0.5",
             "--save_csv", str(raw_csv_out),
         ]
         run_step("1. End-to-End Multi-Modal Evaluation (Raw Inference)", eval_cmd)

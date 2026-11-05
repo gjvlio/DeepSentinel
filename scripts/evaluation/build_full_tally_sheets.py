@@ -29,31 +29,72 @@ EVAL_DIR = BASE / "data" / "eval_results"
 
 # ── 1. TABLE 8.A: FakeAVCeleb 700 Clips ─────────────────────────────────────
 fav_input = EVAL_DIR / "annotated_nonbinary_full.csv"
+if not fav_input.exists():
+    fav_input = EVAL_DIR / "annotated_350+350_TP_TN_FP_FN.csv"
+if not fav_input.exists():
+    fav_input = EVAL_DIR / "fakeavceleb_eval_predictions_350+350.csv"
+
 fav_rows = list(csv.DictReader(open(fav_input, encoding="utf-8")))
+
+# Optional DeepSentinel (zero-shot) check
+zs_rows = {}
+for zs_cand in [
+    EVAL_DIR / "annotated_zeroshot_nonbinary_full.csv",
+    EVAL_DIR / "annotated_zeroshot_350+350_TP_TN_FP_FN.csv",
+    EVAL_DIR / "fakeavceleb_eval_predictions_zeroshot_350+350.csv",
+]:
+    if zs_cand.exists():
+        zs_rows = {r["clip_id"]: r for r in csv.DictReader(open(zs_cand, encoding="utf-8"))}
+        print(f"[Model Ingestion] Ingested {len(zs_rows)} zero-shot clips from -> {zs_cand}")
+        break
+
+# Dynamic calculation of adapted model tallies at tau = 0.50
+fav_tp = sum(1 for r in fav_rows if int(r["fake_label"]) == 1 and (1 if float(r.get("raw_score", r.get("score", 0))) >= 0.50 else 0) == 1)
+fav_tn = sum(1 for r in fav_rows if int(r["fake_label"]) == 0 and (1 if float(r.get("raw_score", r.get("score", 0))) >= 0.50 else 0) == 0)
+fav_fp = sum(1 for r in fav_rows if int(r["fake_label"]) == 0 and (1 if float(r.get("raw_score", r.get("score", 0))) >= 0.50 else 0) == 1)
+fav_fn = sum(1 for r in fav_rows if int(r["fake_label"]) == 1 and (1 if float(r.get("raw_score", r.get("score", 0))) >= 0.50 else 0) == 0)
+fav_total = len(fav_rows)
+fav_acc = (fav_tp + fav_tn) / fav_total if fav_total else 0.0
 
 table_8a_md_lines = []
 table_8a_md_lines.append("# Table 8.A: Full Clip-by-Clip Deepfake Detection Tally Sheet (FakeAVCeleb, N = 700)")
 table_8a_md_lines.append("> Dataset: FakeAVCeleb Balanced Test Set ($N = 700$, 350 Real, 350 Fake)")
-table_8a_md_lines.append("> Decision Rule: $\\tau = 0.50$ (Bayes-Optimal Operating Point / `pred_cal`)")
-table_8a_md_lines.append("> Total Counts: **TP = 305**, **TN = 270**, **FP = 80**, **FN = 45** (Accuracy: **82.14%**)")
+table_8a_md_lines.append("> Decision Rule: $\\tau = 0.50$ (Bayes-Optimal Operating Point)")
+table_8a_md_lines.append(f"> DeepSentinel (few-shot / adapted) Counts: **TP = {fav_tp}**, **TN = {fav_tn}**, **FP = {fav_fp}**, **FN = {fav_fn}** (Accuracy: **{fav_acc*100:.2f}%**)")
+
+if zs_rows:
+    for r in fav_rows:
+        cid = r["clip_id"]
+        if cid in zs_rows:
+            assert int(r["fake_label"]) == int(zs_rows[cid]["fake_label"]), (
+                f"Label mismatch for clip '{cid}': adapted={r['fake_label']} vs zero-shot={zs_rows[cid]['fake_label']}"
+            )
+    zs_tp = sum(1 for r in fav_rows if int(r["fake_label"]) == 1 and (1 if float(zs_rows.get(r["clip_id"], {}).get("raw_score", zs_rows.get(r["clip_id"], {}).get("score", 0))) >= 0.50 else 0) == 1)
+    zs_tn = sum(1 for r in fav_rows if int(r["fake_label"]) == 0 and (1 if float(zs_rows.get(r["clip_id"], {}).get("raw_score", zs_rows.get(r["clip_id"], {}).get("score", 0))) >= 0.50 else 0) == 0)
+    zs_fp = sum(1 for r in fav_rows if int(r["fake_label"]) == 0 and (1 if float(zs_rows.get(r["clip_id"], {}).get("raw_score", zs_rows.get(r["clip_id"], {}).get("score", 0))) >= 0.50 else 0) == 1)
+    zs_fn = sum(1 for r in fav_rows if int(r["fake_label"]) == 1 and (1 if float(zs_rows.get(r["clip_id"], {}).get("raw_score", zs_rows.get(r["clip_id"], {}).get("score", 0))) >= 0.50 else 0) == 0)
+    zs_acc = (zs_tp + zs_tn) / fav_total if fav_total else 0.0
+    table_8a_md_lines.append(f"> DeepSentinel (zero-shot) Counts: **TP = {zs_tp}**, **TN = {zs_tn}**, **FP = {zs_fp}**, **FN = {zs_fn}** (Accuracy: **{zs_acc*100:.2f}%**)")
+
 table_8a_md_lines.append("")
-table_8a_md_lines.append("| Row # | Clip ID | Ground Truth (1, 0) | Predicted Class (1, 0) | Tally Classification (TP, TN, FP, FN) | Calibrated Raw Score | Confidence Tier Band |")
-table_8a_md_lines.append("| :---: | :--- | :---: | :---: | :---: | :---: | :--- |")
+if zs_rows:
+    table_8a_md_lines.append("| Row # | Clip ID | Ground Truth (1, 0) | DeepSentinel (few-shot / adapted) Pred | DeepSentinel (few-shot / adapted) Tally | DeepSentinel (few-shot / adapted) Score | DeepSentinel (zero-shot) Pred | DeepSentinel (zero-shot) Tally | DeepSentinel (zero-shot) Score | Confidence Tier Band |")
+    table_8a_md_lines.append("| :---: | :--- | :---: | :---: | :---: | :---: | :---: | :---: | :---: | :--- |")
+else:
+    table_8a_md_lines.append("| Row # | Clip ID | Ground Truth (1, 0) | Predicted Class (1, 0) | Tally Classification (TP, TN, FP, FN) | Calibrated Raw Score | Confidence Tier Band |")
+    table_8a_md_lines.append("| :---: | :--- | :---: | :---: | :---: | :---: | :--- |")
 
 csv_8a_rows = []
 for r in fav_rows:
     row_no = r["row_no"]
     cid = r["clip_id"]
-    gt = r["fake_label"]
-    pred = r["pred_cal"]
-    annot = r["annotation"]
-    score = float(r["raw_score"])
-    tier = r["confidence_tier"]
-    
-    table_8a_md_lines.append(
-        f"| {row_no} | `{cid}` | {gt} | {pred} | **{annot}** | {score:.4f} ({score*100:.1f}%) | {tier} |"
-    )
-    csv_8a_rows.append({
+    gt = int(r["fake_label"])
+    score = float(r.get("raw_score", r.get("score", 0.0)))
+    pred = 1 if score >= 0.50 else 0
+    annot = "TP" if (gt == 1 and pred == 1) else ("TN" if (gt == 0 and pred == 0) else ("FP" if (gt == 0 and pred == 1) else "FN"))
+    tier = r.get("confidence_tier", "High Confidence Deepfake" if score >= 0.70 else ("High Confidence Authentic" if score <= 0.30 else "Inconclusive"))
+
+    row_dict = {
         "row_no": row_no,
         "clip_id": cid,
         "ground_truth": gt,
@@ -61,12 +102,35 @@ for r in fav_rows:
         "tally_classification": annot,
         "calibrated_score": f"{score:.4f}",
         "confidence_tier": tier,
-    })
+    }
+
+    if zs_rows:
+        zr = zs_rows.get(cid, {})
+        z_score = float(zr.get("raw_score", zr.get("score", 0.0)))
+        z_pred = 1 if z_score >= 0.50 else 0
+        z_annot = "TP" if (gt == 1 and z_pred == 1) else ("TN" if (gt == 0 and z_pred == 0) else ("FP" if (gt == 0 and z_pred == 1) else "FN"))
+        row_dict["zeroshot_predicted_class"] = z_pred
+        row_dict["zeroshot_tally_classification"] = z_annot
+        row_dict["zeroshot_score"] = f"{z_score:.4f}"
+        table_8a_md_lines.append(
+            f"| {row_no} | `{cid}` | {gt} | {pred} | **{annot}** | {score:.4f} ({score*100:.1f}%) | {z_pred} | **{z_annot}** | {z_score:.4f} ({z_score*100:.1f}%) | {tier} |"
+        )
+    else:
+        table_8a_md_lines.append(
+            f"| {row_no} | `{cid}` | {gt} | {pred} | **{annot}** | {score:.4f} ({score*100:.1f}%) | {tier} |"
+        )
+
+    csv_8a_rows.append(row_dict)
 
 # Overall Summary Row
-table_8a_md_lines.append(
-    "| **OVERALL** | **700 Clips Total** | **350 Real, 350 Fake** | **315 Pred Real, 385 Pred Fake** | **TP: 305, TN: 270, FP: 80, FN: 45** | **Mean Score: 0.5363 (Real: 0.2531, Fake: 0.8195)** | **Accuracy: 82.14% (575/700) — F1: 0.8299, AUC: 0.9020** |"
-)
+if zs_rows:
+    table_8a_md_lines.append(
+        f"| **OVERALL** | **700 Clips Total** | **350 Real, 350 Fake** | **Adapted: {fav_tp+fav_fp} Fake, {fav_tn+fav_fn} Real** | **TP: {fav_tp}, TN: {fav_tn}, FP: {fav_fp}, FN: {fav_fn}** | **Adapted Acc: {fav_acc*100:.2f}%** | **Zero-Shot: {zs_tp+zs_fp} Fake, {zs_tn+zs_fn} Real** | **TP: {zs_tp}, TN: {zs_tn}, FP: {zs_fp}, FN: {zs_fn}** | **Zero-Shot Acc: {zs_acc*100:.2f}%** | **Decision Rule: tau = 0.50** |"
+    )
+else:
+    table_8a_md_lines.append(
+        f"| **OVERALL** | **700 Clips Total** | **350 Real, 350 Fake** | **{fav_tp+fav_fp} Pred Fake, {fav_tn+fav_fn} Pred Real** | **TP: {fav_tp}, TN: {fav_tn}, FP: {fav_fp}, FN: {fav_fn}** | **Accuracy: {fav_acc*100:.2f}% ({fav_tp+fav_tn}/700)** | **Decision Rule: tau = 0.50** |"
+    )
 
 # Save standalone Table 8.A
 with open(DOCS_DIR / "TABLE_8A_FAKEAVCELEB_700_CLIPS.md", "w", encoding="utf-8") as f:
@@ -241,22 +305,7 @@ part1_2 = content.split("# PART 3: Clip-by-Clip Tally Sheets")[0]
 
 new_part3 = []
 new_part3.append("# PART 3: Clip-by-Clip Tally Sheets\n")
-new_part3.append("### Table 8.A: Full Clip-by-Clip Deepfake Detection Tally Sheet (FakeAVCeleb, N = 700)")
-new_part3.append("*(Complete list of all 700 evaluation clips from `data/eval_results/annotated_nonbinary_full.csv`. Ready to copy directly into Word / LaTeX.)*\n")
-new_part3.append("| Row # | Clip ID | Ground Truth (1, 0) | Predicted Class (1, 0) | Tally Classification (TP, TN, FP, FN) | Calibrated Raw Score | Confidence Tier Band |")
-new_part3.append("| :---: | :--- | :---: | :---: | :---: | :---: | :--- |")
-for r in fav_rows:
-    row_no = r["row_no"]
-    cid = r["clip_id"]
-    gt = r["fake_label"]
-    pred = r["pred_cal"]
-    annot = r["annotation"]
-    score = float(r["raw_score"])
-    tier = r["confidence_tier"]
-    new_part3.append(f"| {row_no} | `{cid}` | {gt} | {pred} | **{annot}** | {score:.4f} ({score*100:.1f}%) | {tier} |")
-
-# Overall Summary Row
-new_part3.append("| **OVERALL** | **700 Clips Total** | **350 Real, 350 Fake** | **315 Pred Real, 385 Pred Fake** | **TP: 305, TN: 270, FP: 80, FN: 45** | **Mean Score: 0.5363 (Real: 0.2531, Fake: 0.8195)** | **Accuracy: 82.14% (575/700) — F1: 0.8299, AUC: 0.9020** |")
+new_part3.extend(table_8a_md_lines)
 
 new_part3.append("\n---\n")
 new_part3.append("### Table 8.B: Full Clip-by-Clip Emotion Recognition Tally Sheet (CREMA-D, N = 700)")

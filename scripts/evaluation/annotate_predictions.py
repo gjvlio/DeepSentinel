@@ -75,7 +75,8 @@ print(f"Loaded {len(rows)} clips from {INPUT_CSV}")
 annotated = []
 for r in rows:
     label    = int(r["fake_label"])
-    pred_cal = int(r["pred_cal"])
+    score    = float(r["score"]) if "score" in r else float(r["raw_score"])
+    pred_cal = 1 if score >= 0.50 else 0
     annot    = classify(label, pred_cal)
     annotated.append({
         "row_no"     : len(annotated) + 1,
@@ -83,7 +84,7 @@ for r in rows:
         "fake_label" : label,
         "method"     : r["method"],
         "type"       : r["type"],
-        "raw_score"  : float(r["score"]),
+        "raw_score"  : score,
         "pred_cal"   : pred_cal,
         "annotation" : annot,
     })

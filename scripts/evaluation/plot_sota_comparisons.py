@@ -49,12 +49,14 @@ log = logging.getLogger(__name__)
 
 # Premium Styling Palettes
 COLORS = {
-    "DeepSentinel (Ours)": "#0284c7",    # Electric Ocean Blue
-    "MesoNet-4":           "#ef4444",    # Crimson Red
-    "XceptionNet":         "#f59e0b",    # Amber Orange
-    "Multimodal ResNet-AV":"#10b981",    # Emerald Green
-    "LipForensics":        "#ec4899",    # Rose Pink
-    "AceNet (Baseline)":   "#8b5cf6",    # Purple
+    "DeepSentinel (few-shot / adapted)": "#0284c7",    # Electric Ocean Blue
+    "DeepSentinel (zero-shot)":          "#06b6d4",    # Cyan / Teal
+    "DeepSentinel (Ours)":               "#0284c7",    # Backward-compatibility alias
+    "MesoNet-4":                         "#ef4444",    # Crimson Red
+    "XceptionNet":                       "#f59e0b",    # Amber Orange
+    "Multimodal ResNet-AV":              "#10b981",    # Emerald Green
+    "LipForensics":                      "#ec4899",    # Rose Pink
+    "AceNet (Baseline)":                 "#8b5cf6",    # Purple
 }
 
 
@@ -84,17 +86,9 @@ def load_model_predictions(path: Path, model_name: str = "") -> dict:
             else:
                 score = float(row.get("score", 0.5))
 
-            # Adaptively resolve pred column
-            if is_acenet and "acenet_pred" in row:
-                pred = int(row["acenet_pred"])
-            elif is_ds and "deepsentinel_pred" in row:
-                pred = int(row["deepsentinel_pred"])
-            elif "pred" in row:
-                pred = int(row["pred"])
-            elif "acenet_pred" in row:
-                pred = int(row["acenet_pred"])
-            elif "deepsentinel_pred" in row:
-                pred = int(row["deepsentinel_pred"])
+            # Decision threshold tau = 0.50
+            if "pred_50" in row:
+                pred = int(row["pred_50"])
             else:
                 pred = 1 if score >= 0.50 else 0
 
@@ -158,7 +152,7 @@ def compute_comprehensive_metrics(y_true: list[int], y_score: list[float], y_pre
     }
 
 
-def print_master_academic_table(models_data: dict, ref_name: str = "DeepSentinel (Ours)"):
+def print_master_academic_table(models_data: dict, ref_name: str = "DeepSentinel (few-shot / adapted)"):
     print("\n" + "=" * 120)
     print("  🏆 MASTER COMPARATIVE BENCHMARK TABLE (RESEARCH & THESIS CHAPTER 4)")
     print("=" * 120)
@@ -166,6 +160,29 @@ def print_master_academic_table(models_data: dict, ref_name: str = "DeepSentinel
     print("  " + "-" * 118)
 
     ref_preds = models_data[ref_name]
+    ref_keys = set(ref_preds["clips"].keys())
+
+    # Strict 700-clip validation across all models
+    if len(ref_preds["clips"]) == 700:
+        for name, data in models_data.items():
+            if len(data["clips"]) != 700:
+                raise ValueError(f"Model '{name}' does not have exactly 700 rows (found {len(data['clips'])}).")
+            m_keys = set(data["clips"].keys())
+            missing_ids = ref_keys - m_keys
+            extra_ids = m_keys - ref_keys
+            if missing_ids or extra_ids:
+                if "acenet" in name.lower():
+                    print(f"  [NOTICE] Baseline '{name}' has a separate 700-clip sample ({len(m_keys & ref_keys)} overlapping clips, {len(missing_ids)} non-overlapping). Preserving compatibility.")
+                else:
+                    raise ValueError(
+                        f"Model '{name}' clip IDs do not match the expected 700 clips.\n"
+                        f"  Missing IDs ({len(missing_ids)}): {sorted(list(missing_ids))[:10]}...\n"
+                        f"  Extra IDs ({len(extra_ids)}): {sorted(list(extra_ids))[:10]}..."
+                    )
+            for c in (ref_keys & m_keys):
+                if ref_preds["clips"][c]["fake_label"] != data["clips"][c]["fake_label"]:
+                    raise ValueError(f"Ground-truth label mismatch for clip '{c}': {ref_name}={ref_preds['clips'][c]['fake_label']} vs {name}={data['clips'][c]['fake_label']}")
+
     for name, data in models_data.items():
         m = data["metrics"]
         modality = data.get("modality", "Visual")
@@ -176,6 +193,9 @@ def print_master_academic_table(models_data: dict, ref_name: str = "DeepSentinel
         else:
             try:
                 shared = sorted(set(ref_preds["clips"]) & set(data["clips"]))
+                for c in shared:
+                    if ref_preds["clips"][c]["fake_label"] != data["clips"][c]["fake_label"]:
+                        raise ValueError(f"Ground-truth label mismatch for clip '{c}': {ref_name}={ref_preds['clips'][c]['fake_label']} vs {name}={data['clips'][c]['fake_label']}")
                 y_s = [ref_preds["clips"][c]["fake_label"] for c in shared]
                 sc_ref = [ref_preds["clips"][c]["score"] for c in shared]
                 sc_mod = [data["clips"][c]["score"] for c in shared]
@@ -549,6 +569,8 @@ def main():
     parser = argparse.ArgumentParser(description="Master Comparative Evaluation & Visualizations")
     parser.add_argument("--deepsentinel", type=str, default="fakeavceleb_eval_predictions_350+4650.csv",
                         help="DeepSentinel evaluation predictions CSV")
+    parser.add_argument("--deepsentinel_zeroshot", type=str, default="data/eval_results/fakeavceleb_eval_predictions_zeroshot_350+350.csv",
+                        help="DeepSentinel zero-shot evaluation predictions CSV")
     parser.add_argument("--split", type=str, default=None, choices=["5000", "700", "350+4650", "350+350"],
                         help="Split selector: '5000' or '700'")
     parser.add_argument("--mesonet", type=str, default="data/eval_results/preds_mesonet.csv",
@@ -568,12 +590,32 @@ def main():
     ds_path = resolve_deepsentinel_path(args.deepsentinel, args.split)
 
     models_config = [
-        ("DeepSentinel (Ours)", ds_path, "Affect-Bilinear"),
+        ("DeepSentinel (few-shot / adapted)", ds_path, "Affect-Bilinear (Adapted)"),
+    ]
+
+    # Optional DeepSentinel (zero-shot)
+    if args.deepsentinel_zeroshot:
+        zs_p = Path(args.deepsentinel_zeroshot)
+        if not zs_p.exists():
+            for alt in [
+                REPO_ROOT / args.deepsentinel_zeroshot,
+                REPO_ROOT / "data" / "eval_results" / Path(args.deepsentinel_zeroshot).name,
+                Path("data/eval_results") / Path(args.deepsentinel_zeroshot).name,
+                Path("/content/drive/MyDrive/THESIS_MOTHERFILE/eval_results") / Path(args.deepsentinel_zeroshot).name,
+                Path("/content/drive/MyDrive/eval_results") / Path(args.deepsentinel_zeroshot).name,
+            ]:
+                if alt.exists():
+                    zs_p = alt
+                    break
+        if zs_p.exists():
+            models_config.append(("DeepSentinel (zero-shot)", zs_p, "Affect-Bilinear (Zero-Shot)"))
+
+    models_config.extend([
         ("MesoNet-4", Path(args.mesonet), "Visual CNN"),
         ("XceptionNet", Path(args.xception), "Visual Spatial"),
         ("Multimodal ResNet-AV", Path(args.resnet_av), "Audio-Visual"),
         ("LipForensics", Path(args.lipforensics), "Temporal Viseme"),
-    ]
+    ])
 
     # Optional AceNet (if exported by sister-team)
     if args.acenet:
@@ -637,7 +679,8 @@ def main():
         return
 
     print("=" * 70 + "\n")
-    print_master_academic_table(models_data, ref_name="DeepSentinel (Ours)" if "DeepSentinel (Ours)" in models_data else list(models_data.keys())[0])
+    ref_model_name = "DeepSentinel (few-shot / adapted)" if "DeepSentinel (few-shot / adapted)" in models_data else ("DeepSentinel (Ours)" if "DeepSentinel (Ours)" in models_data else list(models_data.keys())[0])
+    print_master_academic_table(models_data, ref_name=ref_model_name)
     plot_comparative_figures(models_data, Path(args.output_dir))
 
 
