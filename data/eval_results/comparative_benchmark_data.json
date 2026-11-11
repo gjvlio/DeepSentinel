@@ -14,30 +14,58 @@
   },
   "models": [
     {
-      "name": "DeepSentinel (Ours)",
+      "name": "DeepSentinel (few-shot / adapted)",
       "id": "deepsentinel",
-      "badge": "Proposed Method",
+      "badge": "Proposed Method (Few-Shot / Adapted)",
       "modality": "Affect-Bilinear Cross-Attention (Audio + Video + Text)",
       "color": "#0284c7",
       "metrics": {
-        "accuracy": 80.86,
-        "balanced_accuracy": 80.86,
-        "precision": 80.86,
-        "recall_fake": 80.86,
-        "specificity_real": 80.86,
-        "f1_score": 0.8086,
-        "mcc": 0.6171,
-        "auc_roc": 0.8748,
-        "auc_ci_lower": 0.849,
-        "auc_ci_upper": 0.899,
-        "tp": 283,
-        "fp": 67,
-        "tn": 283,
-        "fn": 67
+        "accuracy": 79.71,
+        "balanced_accuracy": 79.71,
+        "precision": 77.96,
+        "recall_fake": 82.86,
+        "specificity_real": 76.57,
+        "f1_score": 0.8033,
+        "mcc": 0.5955,
+        "auc_roc": 0.8749,
+        "auc_ci_lower": 0.848,
+        "auc_ci_upper": 0.898,
+        "tp": 290,
+        "fp": 82,
+        "tn": 268,
+        "fn": 60
       },
       "delong_test": {
         "p_value": null,
         "significance": "Reference"
+      }
+    },
+    {
+      "name": "DeepSentinel (zero-shot)",
+      "id": "deepsentinel_zeroshot",
+      "badge": "Proposed Method (Zero-Shot)",
+      "modality": "Affect-Bilinear Cross-Attention (Zero-Shot Cross-Dataset)",
+      "color": "#06b6d4",
+      "metrics": {
+        "accuracy": 51.71,
+        "balanced_accuracy": 51.71,
+        "precision": 51.03,
+        "recall_fake": 84.57,
+        "specificity_real": 18.86,
+        "f1_score": 0.6366,
+        "mcc": 0.0455,
+        "auc_roc": 0.5639,
+        "auc_ci_lower": 0.523,
+        "auc_ci_upper": 0.609,
+        "tp": 296,
+        "fp": 284,
+        "tn": 66,
+        "fn": 54
+      },
+      "delong_test": {
+        "p_value": 0.0,
+        "significance": "p < 0.001 (Statistically Significant)",
+        "z_score": null
       }
     },
     {
@@ -175,18 +203,23 @@
         "fn": 168
       },
       "delong_test": {
-        "p_value": 0.002482,
-        "significance": "p = 0.0025*",
+        "p_value": 0.002404,
+        "significance": "p = 0.0024*",
         "z_score": null
       }
     }
   ],
   "per_manipulation_breakdown": {
     "faceswap": {
-      "DeepSentinel (Ours)": {
+      "DeepSentinel (few-shot / adapted)": {
         "total": 13,
         "correct": 11,
         "accuracy": 84.62
+      },
+      "DeepSentinel (zero-shot)": {
+        "total": 13,
+        "correct": 13,
+        "accuracy": 100.0
       },
       "MesoNet-4": {
         "total": 13,
@@ -215,10 +248,15 @@
       }
     },
     "faceswap-wav2lip": {
-      "DeepSentinel (Ours)": {
+      "DeepSentinel (few-shot / adapted)": {
         "total": 58,
         "correct": 56,
         "accuracy": 96.55
+      },
+      "DeepSentinel (zero-shot)": {
+        "total": 58,
+        "correct": 46,
+        "accuracy": 79.31
       },
       "MesoNet-4": {
         "total": 58,
@@ -247,10 +285,15 @@
       }
     },
     "fsgan": {
-      "DeepSentinel (Ours)": {
+      "DeepSentinel (few-shot / adapted)": {
         "total": 40,
-        "correct": 23,
-        "accuracy": 57.5
+        "correct": 26,
+        "accuracy": 65.0
+      },
+      "DeepSentinel (zero-shot)": {
+        "total": 40,
+        "correct": 35,
+        "accuracy": 87.5
       },
       "MesoNet-4": {
         "total": 40,
@@ -279,10 +322,15 @@
       }
     },
     "fsgan-wav2lip": {
-      "DeepSentinel (Ours)": {
+      "DeepSentinel (few-shot / adapted)": {
         "total": 69,
         "correct": 67,
         "accuracy": 97.1
+      },
+      "DeepSentinel (zero-shot)": {
+        "total": 69,
+        "correct": 61,
+        "accuracy": 88.41
       },
       "MesoNet-4": {
         "total": 69,
@@ -311,10 +359,15 @@
       }
     },
     "real": {
-      "DeepSentinel (Ours)": {
+      "DeepSentinel (few-shot / adapted)": {
         "total": 350,
-        "correct": 283,
-        "accuracy": 80.86
+        "correct": 268,
+        "accuracy": 76.57
+      },
+      "DeepSentinel (zero-shot)": {
+        "total": 350,
+        "correct": 66,
+        "accuracy": 18.86
       },
       "MesoNet-4": {
         "total": 350,
@@ -343,7 +396,12 @@
       }
     },
     "rtvc": {
-      "DeepSentinel (Ours)": {
+      "DeepSentinel (few-shot / adapted)": {
+        "total": 5,
+        "correct": 3,
+        "accuracy": 60.0
+      },
+      "DeepSentinel (zero-shot)": {
         "total": 5,
         "correct": 3,
         "accuracy": 60.0
@@ -375,10 +433,15 @@
       }
     },
     "wav2lip": {
-      "DeepSentinel (Ours)": {
+      "DeepSentinel (few-shot / adapted)": {
         "total": 165,
-        "correct": 123,
-        "accuracy": 74.55
+        "correct": 127,
+        "accuracy": 76.97
+      },
+      "DeepSentinel (zero-shot)": {
+        "total": 165,
+        "correct": 138,
+        "accuracy": 83.64
       },
       "MesoNet-4": {
         "total": 165,
@@ -409,10 +472,15 @@
   },
   "grouped_category_breakdown": {
     "Visual Swap Only": {
-      "DeepSentinel (Ours)": {
+      "DeepSentinel (few-shot / adapted)": {
         "total": 53,
-        "correct": 34,
-        "accuracy": 64.15
+        "correct": 37,
+        "accuracy": 69.81
+      },
+      "DeepSentinel (zero-shot)": {
+        "total": 53,
+        "correct": 48,
+        "accuracy": 90.57
       },
       "MesoNet-4": {
         "total": 53,
@@ -441,7 +509,12 @@
       }
     },
     "Audio Cloning Only": {
-      "DeepSentinel (Ours)": {
+      "DeepSentinel (few-shot / adapted)": {
+        "total": 5,
+        "correct": 3,
+        "accuracy": 60.0
+      },
+      "DeepSentinel (zero-shot)": {
         "total": 5,
         "correct": 3,
         "accuracy": 60.0
@@ -473,10 +546,15 @@
       }
     },
     "Audio-Visual Combined (Sync/Lip)": {
-      "DeepSentinel (Ours)": {
+      "DeepSentinel (few-shot / adapted)": {
         "total": 292,
-        "correct": 246,
-        "accuracy": 84.25
+        "correct": 250,
+        "accuracy": 85.62
+      },
+      "DeepSentinel (zero-shot)": {
+        "total": 292,
+        "correct": 245,
+        "accuracy": 83.9
       },
       "MesoNet-4": {
         "total": 292,
@@ -505,10 +583,15 @@
       }
     },
     "Authentic / Real Clips": {
-      "DeepSentinel (Ours)": {
+      "DeepSentinel (few-shot / adapted)": {
         "total": 350,
-        "correct": 283,
-        "accuracy": 80.86
+        "correct": 268,
+        "accuracy": 76.57
+      },
+      "DeepSentinel (zero-shot)": {
+        "total": 350,
+        "correct": 66,
+        "accuracy": 18.86
       },
       "MesoNet-4": {
         "total": 350,
@@ -535,6 +618,42 @@
         "correct": 266,
         "accuracy": 76.0
       }
+    }
+  },
+  "delong_vs_zeroshot": {
+    "DeepSentinel (few-shot / adapted)": {
+      "p_value": 0.0,
+      "significance": "p < 0.001 (Statistically Significant)",
+      "z_score": null
+    },
+    "DeepSentinel (zero-shot)": {
+      "p_value": null,
+      "significance": "Reference"
+    },
+    "MesoNet-4": {
+      "p_value": 0.420477,
+      "significance": "p = 0.4205",
+      "z_score": null
+    },
+    "XceptionNet": {
+      "p_value": 0.042034,
+      "significance": "p = 0.0420*",
+      "z_score": null
+    },
+    "Multimodal ResNet-AV": {
+      "p_value": 0.001673,
+      "significance": "p = 0.0017*",
+      "z_score": null
+    },
+    "LipForensics": {
+      "p_value": 0.103151,
+      "significance": "p = 0.1032",
+      "z_score": null
+    },
+    "AceNet (Baseline)": {
+      "p_value": 0.747744,
+      "significance": "p = 0.7477",
+      "z_score": null
     }
   },
   "figure_assets": {

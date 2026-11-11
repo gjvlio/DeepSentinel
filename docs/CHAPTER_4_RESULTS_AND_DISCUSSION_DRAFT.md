@@ -34,6 +34,10 @@ Table 4.1 reports the aggregate confusion matrix parameters and overall classifi
 | **Disgust** | 126 | 83 | 45 | 567 | 43 | 64.8% | 65.9% | 0.653 |
 | **Macro Average / Total** | **738** | **534** | **204** | **3,469** | **204** | **72.4%** | **72.4%** | **0.724** |
 
+![Figure 4.1: Normalized Confusion Matrix Heatmap of Emotion Head A on CREMA-D](../data/eval_results/figures_comparative/figure_rq1_confusion_matrix_head_a.png)
+
+> **Figure 4.1:** *Normalized Confusion Matrix Heatmap of Emotion Head A (Speech-Text) across 738 held-out CREMA-D evaluation clips. The strong diagonal density illustrates high discriminative capability, peaking on high-activation emotional categories.*
+
 Across the six categories, performance is strongest on high-activation emotional states: **Angry** achieves the highest F1-score of **0.754** (Recall: 77.8%), followed closely by **Happy** with an F1-score of **0.753** (Recall: 76.2%). In contrast, lower-activation states with subtle acoustic variances exhibited moderate performance: **Fear** achieved an F1-score of **0.677**, and **Disgust** achieved **0.653**.
 
 ### 4.1.3 Forensic and Theoretical Interpretation: Why This Result Matters
@@ -42,6 +46,10 @@ Across the six categories, performance is strongest on high-activation emotional
 The divergence between high-arousal emotions (Angry/Happy) and low-arousal emotions (Fear/Disgust) is directly rooted in the physical acoustics of human speech production:
 * **High-Arousal Signatures:** States of rage and extreme joy trigger sympathetic nervous system arousal, elevating respiratory subglottal pressure and vocal fold tension. This induces distinct, non-linear acoustic markers: dramatic fundamental frequency ($F_0$) shifts, sharp harmonic-to-noise ratios (HNR), and high root-mean-square (RMS) energy. The convolutional self-attention layers of Wav2Vec 2.0 easily map these broad spectral contours into distinct latent clusters, explaining the high recall ($77.8\%$ and $76.2\%$).
 * **Acoustic Ambiguity in Low-Arousal States:** Disgust and Fear are characterized by vocal fold relaxation, breathiness, and compressed pitch ranges. In spontaneous speech, a disgusted or fearful utterance frequently shares acoustic spectral density with neutral or subdued speech. Furthermore, when Whisper transcribes short conversational phrases, the resulting lexical token embeddings from BERT often lack overt emotional keywords (e.g., *"Why would you do that?"* can be spoken with disgust, fear, or neutrality). Consequently, without exaggerated lexical cues, the classifier experiences minor boundary confusion.
+
+![Figure 4.2: Comparative Acoustic Prosody Signatures in Speech Production](../data/eval_results/figures_comparative/figure_rq1_prosody_acoustics_comparison.png)
+
+> **Figure 4.2:** *Physical Acoustic Prosody Signatures Across Emotional Arousal Levels. (Top) High-arousal state ('Angry') exhibiting wide dynamic amplitude and elevated pitch contour ($F_0: 180\text{–}280\text{ Hz}$). (Bottom) Low-arousal state ('Sad / Disgust') exhibiting compressed pitch range ($F_0: 105\text{–}125\text{ Hz}$) and dampened RMS amplitude.*
 
 #### 2. What Is the Significance to the Overall Thesis? (The Forensic Reference Anchor)
 This result is not an isolated metric; it serves as **the foundation of the entire multimodal detection framework**:
@@ -80,6 +88,10 @@ Table 4.3 presents the global classification tallies, and Table 4.4 details the 
 | **Disgust** | 126 | 88 | 37 | 575 | 38 | 70.4% | 69.8% | 0.701 |
 | **Macro Average / Total** | **738** | **547** | **191** | **3,499** | **191** | **74.1%** | **74.1%** | **0.741** |
 
+![Figure 4.3: Normalized Confusion Matrix Heatmap of Emotion Head B on CREMA-D](../data/eval_results/figures_comparative/figure_rq2_confusion_matrix_head_b.png)
+
+> **Figure 4.3:** *Normalized Confusion Matrix Heatmap for Emotion Head B (Visual Keyframes) on held-out CREMA-D evaluation clips ($N = 738$). Visual discrimination peaks on categories with overt Action Unit deformations, led by Happy ($83.3\%$ Recall) and Angry ($77.0\%$ Recall).*
+
 Emotion Head B achieves an overall accuracy of **74.1%** and a Macro F1-score of **0.741**. Expressions characterized by pronounced facial Action Unit (AU) contractions demonstrated the highest discrimination: **Happy** reached an F1-score of **0.820** (Recall: 83.3%, Precision: 80.8%), and **Angry** attained an F1-score of **0.764** (Recall: 77.0%).
 
 ### 4.2.3 Forensic and Theoretical Interpretation: Why This Result Matters
@@ -88,6 +100,10 @@ Emotion Head B achieves an overall accuracy of **74.1%** and a Macro F1-score of
 The high visual accuracy stems directly from the combination of spatial attention and temporal modeling:
 * **Morphological Dominance of Zygomatic and Corrugator Contractions:** A genuine smile involves bilateral contraction of the *zygomaticus major* (AU12: pulling lip corners obliquely) and *orbicularis oculi* (AU6: raising cheeks and crinkling eye margins). These produce high-contrast, macro-structural deformations across multiple ViT image patches ($16\times 16$ pixels), explaining the **82.0% F1-score** on Happy. Similarly, Anger triggers the *corrugator supercilii* (AU4: drawing eyebrows medially and downward), creating distinct vertical glabellar furrows that ViT attention heads readily capture.
 * **The Critical Role of the 2-Layer Temporal GRU:** Human facial expressions are dynamic biological sequences, not static masks. A static image capture often freezes a face during expression transition (onset or offset), where a smile or sneer looks ambiguous. By processing the sequence of eight ranked keyframes through a 2-layer GRU, the network captures the velocity and trajectory of facial muscle contraction over time, filtering out transient eye-blinks or speech-induced mouth movements.
+
+![Figure 4.4: Action Unit (AU) Keyframe Extraction on CREMA-D Sample](../data/eval_results/figures_comparative/sample_face_au_clean.png)
+
+> **Figure 4.4:** *Facial Action Unit (AU) Keyframe Extraction on CREMA-D Sample (`1061_DFA_HAP_XX.mp4`). RetinaFace detection isolates the facial boundary (green dashed box). Red markers at the oral commissures denote AU12 (Zygomaticus Major) bilateral oblique pull; blue markers denote AU6 (Orbicularis Oculi) infraorbital cheek raising.*
 
 #### 2. What Is the Significance to the Overall Thesis? (The Balanced Parity Principle)
 The most critical scientific finding of Sections 4.1 and 4.2 lies in the **diagnostic parity between the two independent sensing streams**:
